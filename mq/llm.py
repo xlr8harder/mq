@@ -9,6 +9,9 @@ from llm_client.retry import retry_request
 from .errors import LLMError
 
 
+DEFAULT_TIMEOUT_SECONDS = 600
+
+
 @dataclass(frozen=True)
 class ChatResult:
     content: str
@@ -98,7 +101,7 @@ def _coerce_content(raw_content) -> str | None:
 
 def chat(provider_name: str, model_id: str, messages: list[dict]) -> ChatResult:
     provider = get_provider(provider_name)
-    response = retry_request(provider, messages=messages, model_id=model_id)
+    response = retry_request(provider, messages=messages, model_id=model_id, timeout=DEFAULT_TIMEOUT_SECONDS)
     if not response.success:
         base_error_info = response.error_info or {}
         status_code = base_error_info.get("status_code")
