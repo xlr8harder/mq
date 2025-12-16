@@ -11,6 +11,8 @@ Before doing anything else run `bd onboard`
 
 We use `uv` to manage our python environment.  To run python use `uv run python`. Use `uv` for package management, and so on.
 
+We use the llm_client library to handle requests to ai model providers.  It is already installed in your uv environment.  API keys are in ~/.zshrc for now, which you can source.
+
 ## Issue Tracking with bd (beads)
 
 **IMPORTANT**: This project uses **bd (beads)** for ALL issue tracking. Do NOT use markdown TODOs, task lists, or other tracking methods.
