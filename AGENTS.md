@@ -1,5 +1,3 @@
-Before doing anything else run `bd onboard`
-
 ## Development guidelines
 
 1. All code should have thorough test coverage.

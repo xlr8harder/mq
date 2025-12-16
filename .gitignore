@@ -12,6 +12,7 @@
 __pycache__/
 *.py[cod]
 .venv/
+*.egg-info/
 
 # Data (do not commit upstream datasets)
 data/raw/

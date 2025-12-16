@@ -1,12 +1,22 @@
 [project]
 name = "mq"
 version = "0.1.0"
-description = "Add your description here"
+description = "Command-line tool to query configured LLM chat models"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "llm-client",
 ]
+
+[project.scripts]
+mq = "mq.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["mq"]
 
 [tool.uv.sources]
 llm-client = { git = "https://github.com/xlr8harder/llm_client.git" }

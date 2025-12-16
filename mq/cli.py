@@ -1,0 +1,313 @@
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+from llm_client import get_provider
+
+from .errors import LLMError, MQError, UserError
+from .llm import chat
+from .store import (
+    CONVERSATION_VERSION,
+    ensure_home,
+    get_model,
+    list_models,
+    load_last_conversation,
+    remove_model,
+    save_last_conversation,
+    upsert_model,
+)
+
+
+def _print_err(message: str) -> None:
+    print(message, file=sys.stderr)
+
+def _print_llm_error(error: LLMError) -> None:
+    info = error.error_info or {}
+    provider = info.get("provider")
+    model = info.get("model")
+    err_type = info.get("type")
+    status_code = info.get("status_code")
+
+    parts: list[str] = []
+    if provider:
+        parts.append(f"provider={provider}")
+    if model:
+        parts.append(f"model={model}")
+    if err_type:
+        parts.append(f"type={err_type}")
+    if status_code is not None:
+        parts.append(f"status={status_code}")
+
+    prefix = "LLM error"
+    if parts:
+        prefix += f" ({', '.join(parts)})"
+
+    _print_err(f"{prefix}: {error}")
+
+    snippet = info.get("raw_response_snippet") or info.get("raw_provider_response_snippet")
+    if snippet:
+        _print_err(f"raw: {snippet}")
+
+def _emit_result(
+    *,
+    response: str,
+    reasoning: str | None,
+    json_mode: bool,
+    prompt: str | None = None,
+    sysprompt: str | None = None,
+) -> None:
+    if json_mode:
+        payload: dict[str, str] = {"response": response}
+        if prompt is not None:
+            payload["prompt"] = prompt
+        if sysprompt and sysprompt.strip():
+            payload["sysprompt"] = sysprompt
+        if reasoning and reasoning.strip():
+            payload["reasoning"] = reasoning
+        print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+        return
+
+    if reasoning and reasoning.strip():
+        print("reasoning:")
+        print(reasoning)
+        print()
+        print("response:")
+    print(response)
+
+def _read_sysprompt_file(path: str) -> str:
+    try:
+        if path == "-":
+            return sys.stdin.read()
+        return Path(path).expanduser().read_text(encoding="utf-8")
+    except OSError as e:
+        raise UserError(f"Failed to read sysprompt file {path!r}: {e}") from e
+
+
+def _resolve_sysprompt(*, sysprompt: str | None, sysprompt_file: str | None) -> str | None:
+    if sysprompt and sysprompt_file:
+        raise MQError("Use only one of --sysprompt or --sysprompt-file")
+    if sysprompt_file:
+        content = _read_sysprompt_file(sysprompt_file)
+        return content.rstrip("\n")
+    return sysprompt
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="mq")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    add = sub.add_parser("add", help="Add/update a model shortname")
+    add.add_argument("shortname")
+    add.add_argument("--provider", required=True, help="Provider name (llm_client)")
+    add.add_argument("model", help="Full model identifier")
+    add.add_argument("--sysprompt", help="Saved system prompt for this model")
+    add.add_argument("--sysprompt-file", help="Read saved system prompt from file ('-' for stdin)")
+
+    models = sub.add_parser("models", help="List configured models")
+
+    ask = sub.add_parser("ask", help="Ask a configured model")
+    ask.add_argument("shortname")
+    ask.add_argument("--sysprompt", "-s", help="Override system prompt for this run")
+    ask.add_argument("--json", action="store_true", help="Emit a single-line JSON object")
+    ask.add_argument("query")
+
+    cont = sub.add_parser("continue", aliases=["cont"], help="Continue the most recent conversation")
+    cont.add_argument("--json", action="store_true", help="Emit a single-line JSON object")
+    cont.add_argument("query")
+
+    dump = sub.add_parser("dump", help="Dump the last conversation context as JSON")
+
+    rm = sub.add_parser("rm", help="Remove a configured model shortname")
+    rm.add_argument("shortname")
+
+    test = sub.add_parser("test", help="Test a provider/model configuration and (on success) save it")
+    test.add_argument("shortname")
+    test.add_argument("--provider", required=True, help="Provider name (llm_client)")
+    test.add_argument("model", help="Full model identifier")
+    test.add_argument("--sysprompt", help="Saved system prompt for this model")
+    test.add_argument("--sysprompt-file", help="Read saved system prompt from file ('-' for stdin)")
+    test.add_argument("--json", action="store_true", help="Emit a single-line JSON object")
+    test.add_argument("query")
+
+    return parser
+
+
+def _cmd_add(args: argparse.Namespace) -> int:
+    ensure_home()
+    try:
+        get_provider(args.provider)
+    except Exception as e:
+        _print_err(str(e))
+        return 2
+    sysprompt = _resolve_sysprompt(sysprompt=args.sysprompt, sysprompt_file=args.sysprompt_file)
+    upsert_model(args.shortname, args.provider, args.model, sysprompt)
+    return 0
+
+
+def _cmd_models(_: argparse.Namespace) -> int:
+    ensure_home()
+    items = list_models()
+    if not items:
+        print("(no models configured)")
+        return 0
+    for shortname, entry in items:
+        provider = entry["provider"]
+        model = entry["model"]
+        print(f"{shortname}\t{provider}\t{model}")
+    return 0
+
+
+def _conversation_dict(
+    *,
+    model_shortname: str,
+    provider: str,
+    model: str,
+    sysprompt: str | None,
+    messages: list[dict],
+) -> dict:
+    return {
+        "version": CONVERSATION_VERSION,
+        "model_shortname": model_shortname,
+        "provider": provider,
+        "model": model,
+        "sysprompt": sysprompt,
+        "messages": messages,
+    }
+
+
+def _cmd_ask(args: argparse.Namespace) -> int:
+    ensure_home()
+    model_cfg = get_model(args.shortname)
+    provider = model_cfg["provider"]
+    model = model_cfg["model"]
+    sysprompt = args.sysprompt if args.sysprompt is not None else model_cfg.get("sysprompt")
+
+    messages: list[dict] = []
+    if sysprompt:
+        messages.append({"role": "system", "content": sysprompt})
+    messages.append({"role": "user", "content": args.query})
+
+    result = chat(provider, model, messages)
+    _emit_result(
+        response=result.content,
+        reasoning=result.reasoning,
+        json_mode=args.json,
+        prompt=args.query,
+        sysprompt=sysprompt,
+    )
+
+    messages.append({"role": "assistant", "content": result.content})
+    save_last_conversation(
+        _conversation_dict(
+            model_shortname=args.shortname,
+            provider=provider,
+            model=model,
+            sysprompt=sysprompt,
+            messages=messages,
+        )
+    )
+    return 0
+
+
+def _cmd_continue(args: argparse.Namespace) -> int:
+    ensure_home()
+    conv = load_last_conversation()
+    provider = conv.get("provider")
+    model = conv.get("model")
+    messages = conv.get("messages")
+    if not isinstance(provider, str) or not isinstance(model, str) or not isinstance(messages, list):
+        _print_err("Invalid last conversation format")
+        return 2
+
+    if args.json:
+        _print_err("warning: --json output does not include full conversation context (use `mq dump` for history)")
+
+    messages = list(messages)
+    messages.append({"role": "user", "content": args.query})
+
+    result = chat(provider, model, messages)
+    _emit_result(
+        response=result.content,
+        reasoning=result.reasoning,
+        json_mode=args.json,
+        prompt=args.query,
+        sysprompt=conv.get("sysprompt") if isinstance(conv, dict) else None,
+    )
+
+    messages.append({"role": "assistant", "content": result.content})
+    conv["messages"] = messages
+    save_last_conversation(conv)
+    return 0
+
+
+def _cmd_dump(_: argparse.Namespace) -> int:
+    ensure_home()
+    conv = load_last_conversation()
+    print(json.dumps(conv, indent=2, ensure_ascii=False))
+    return 0
+
+
+def _cmd_rm(args: argparse.Namespace) -> int:
+    ensure_home()
+    remove_model(args.shortname)
+    return 0
+
+
+def _cmd_test(args: argparse.Namespace) -> int:
+    ensure_home()
+    try:
+        get_provider(args.provider)
+    except Exception as e:
+        _print_err(str(e))
+        return 2
+
+    messages: list[dict] = []
+    sysprompt = _resolve_sysprompt(sysprompt=args.sysprompt, sysprompt_file=args.sysprompt_file)
+    if sysprompt:
+        messages.append({"role": "system", "content": sysprompt})
+    messages.append({"role": "user", "content": args.query})
+
+    result = chat(args.provider, args.model, messages)
+    _emit_result(
+        response=result.content,
+        reasoning=result.reasoning,
+        json_mode=args.json,
+        prompt=args.query,
+        sysprompt=sysprompt,
+    )
+
+    upsert_model(args.shortname, args.provider, args.model, sysprompt)
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    try:
+        match args.command:
+            case "add":
+                return _cmd_add(args)
+            case "models":
+                return _cmd_models(args)
+            case "ask":
+                return _cmd_ask(args)
+            case "continue" | "cont":
+                return _cmd_continue(args)
+            case "dump":
+                return _cmd_dump(args)
+            case "rm":
+                return _cmd_rm(args)
+            case "test":
+                return _cmd_test(args)
+            case _:
+                _print_err(f"Unknown command: {args.command}")
+                return 2
+    except MQError as e:
+        if isinstance(e, LLMError):
+            _print_llm_error(e)
+        else:
+            _print_err(str(e))
+        return 2
