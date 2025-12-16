@@ -9,6 +9,8 @@ Before doing anything else run `bd onboard`
 5. Do not commit any original upstream datasets, though derived data can be tracked, if appropriate.
 6. If you change **any data synthesis behavior** (e.g. pair selection, JIC prompt, prompt templates, parsing), you must **regenerate a small sample of outputs and review them critically** before committing. Direct evaluation of generated artifacts is required for quality.
 
+We use `uv` to manage our python environment.  To run python use `uv run python`. Use `uv` for package management, and so on.
+
 ## Issue Tracking with bd (beads)
 
 **IMPORTANT**: This project uses **bd (beads)** for ALL issue tracking. Do NOT use markdown TODOs, task lists, or other tracking methods.
