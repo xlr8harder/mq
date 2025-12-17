@@ -1,6 +1,33 @@
 `mq` is a small CLI for querying configured LLM chat models via `llm_client`.
 
-## Install / run
+## Install
+
+From a git checkout:
+
+```bash
+python -m pip install .
+mq help
+```
+
+From GitHub (pipx recommended):
+
+```bash
+pipx install "git+https://github.com/xlr8harder/mq.git"
+mq help
+```
+
+## CLI help
+
+Everything should be discoverable from the CLI:
+
+```bash
+mq help
+mq help ask
+mq help session list
+mq --help
+```
+
+## Dev / run locally
 
 This project uses `uv`. Typical usage is:
 
@@ -13,6 +40,14 @@ You can also run it as a module:
 ```bash
 python -m mq --help
 ```
+
+## API keys
+
+API keys are read from environment variables (via `llm_client`):
+
+- `openai`: `OPENAI_API_KEY`
+- `openrouter`: `OPENROUTER_API_KEY`
+- `chutes`: `CHUTES_API_TOKEN`
 
 ## Configure a model shortname
 

@@ -402,6 +402,13 @@ class MQCLITests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("usage:", out.getvalue())
 
+    def test_help_nested_topic_forwards_to_argparse_help(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            rc = cli.main(["help", "session", "list"])
+        self.assertEqual(rc, 0)
+        self.assertIn("usage:", out.getvalue())
+
     def test_session_rename_updates_latest_pointer(self):
         with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)

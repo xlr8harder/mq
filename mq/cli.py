@@ -27,39 +27,62 @@ from .store import (
 DETAILED_HELP = """\
 mq — Model Query CLI
 
-Common usage:
+Quickstart:
+  mq add gpt --provider openai gpt-4o-mini
+  mq ask gpt "Write a haiku about recursive functions"
+  mq continue "Make it funnier"
+
+Configuration:
+  - Default home: ~/.mq/ (override with MQ_HOME=/path)
+  - Model registry: ~/.mq/config.json
+  - Sessions: ~/.mq/sessions/<session>.json
+  - Latest session pointer: ~/.mq/last_conversation.json (symlink or pointer file)
+
+Commands:
+  mq help [topic...]
+    - mq help              (this page)
+    - mq help ask          (subcommand help)
+    - mq help session list (nested help)
+
   mq add <shortname> --provider <provider> <model> [--sysprompt ... | --sysprompt-file PATH]
+    - Saves/overwrites a model alias in config.json (no network request).
+
+  mq test <shortname> --provider <provider> <model> [--sysprompt ... | --sysprompt-file PATH] [--json] [--save] "<query>"
+    - Validates the provider/model by making a request.
+    - By default it does NOT modify config; pass --save to persist/overwrite the alias on success.
+
   mq models
+    - Lists configured shortnames.
+
   mq ask <shortname> [-s/--sysprompt ...] [--json] [-n/--no-session] [--session <id>] "<query>"
+    - Runs a one-off query against a configured model.
+    - By default creates a new session and prints `session: <id>` first.
+    - Use -n/--no-session for ephemeral asks (no session file, no pointer update).
+    - Use --session <id> to create a named session (collision = error).
+
   mq continue [--session <id>] [--json] "<query>"
   mq cont [--session <id>] [--json] "<query>"
+    - Continues a prior session (default: latest).
+
   mq dump [--session <id>]
+    - Dumps a session JSON (default: latest).
+
   mq session list
   mq session select <id>
   mq session rename <old> <new>
+    - Lists/selects/renames sessions. Session ids must match: [A-Za-z0-9][A-Za-z0-9_-]{0,63}
 
-Notes:
-  - Each `mq ask` creates a new session under ~/.mq/sessions/ unless -n/--no-session is used.
-  - ~/.mq/last_conversation.json is maintained as a symlink/pointer to the latest session file.
-  - If a provider returns a reasoning trace, mq prints it before the response with a `response:` header.
-  - --json prints a single-line JSON object including at least `response` and `prompt`.
-  - `mq test` validates a provider/model; it only saves the alias when --save is provided.
-  - Session ids are filesystem-safe (letters/digits/_/-) with no spaces.
+Output formats:
+  - Normal: prints `session: <id>` first, then optional reasoning, then response.
+  - JSON (--json): single line object containing at least:
+      {"response":"...","prompt":"...","session":"..."}
+    Optional keys:
+      "reasoning" (if provided by model), "sysprompt" (if set), etc.
 
-Examples:
-  mq add gpt --provider openai gpt-4o-mini
-  mq ask gpt "Write a haiku about recursive functions"
-  mq ask -n gpt "quick question"
-  mq ask gpt --session work "start a tracked session"
-  mq continue "Make it funnier"
-  mq test gpt --provider openai gpt-4o-mini "hello"
-  mq test gpt --provider openai gpt-4o-mini --save "hello"
-  mq session list
-  mq continue --session <id> "follow up"
-
-More:
-  mq help <command>   # show argparse help for a specific command
-  mq --help           # short help
+Provider API keys (environment variables, via llm_client):
+  - openai: OPENAI_API_KEY
+  - openrouter: OPENROUTER_API_KEY
+  - chutes: CHUTES_API_TOKEN
 """
 
 
@@ -148,7 +171,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     help_cmd = sub.add_parser("help", help="Show detailed help")
-    help_cmd.add_argument("topic", nargs="?", help="Optional subcommand to show help for")
+    help_cmd.add_argument("topic", nargs=argparse.REMAINDER, help="Optional command path to show help for")
 
     add = sub.add_parser("add", help="Add/update a model shortname")
     add.add_argument("shortname")
@@ -401,13 +424,13 @@ def _cmd_session_rename(args: argparse.Namespace) -> int:
 
 
 def _cmd_help(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
-    topic = (getattr(args, "topic", None) or "").strip()
+    topic = list(getattr(args, "topic", []) or [])
     if not topic:
         print(DETAILED_HELP, end="")
         return 0
     try:
         # Re-parse with the requested subcommand and --help to leverage argparse output.
-        parser.parse_args([topic, "--help"])
+        parser.parse_args([*topic, "--help"])
     except SystemExit as e:
         return int(e.code) if isinstance(e.code, int) else 0
     return 0
