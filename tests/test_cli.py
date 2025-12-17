@@ -365,6 +365,23 @@ class MQCLITests(unittest.TestCase):
             self.assertEqual(store.load_latest_session()["id"], sid1)
             self.assertEqual(store.load_last_conversation().get("id"), sid1)
 
+    def test_help_command_prints_detailed_help(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            rc = cli.main(["help"])
+        self.assertEqual(rc, 0)
+        text = out.getvalue()
+        self.assertIn("mq — Model Query CLI", text)
+        self.assertIn("mq ask", text)
+        self.assertIn("mq session list", text)
+
+    def test_help_topic_forwards_to_argparse_help(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            rc = cli.main(["help", "ask"])
+        self.assertEqual(rc, 0)
+        self.assertIn("usage:", out.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

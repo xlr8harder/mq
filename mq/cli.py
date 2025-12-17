@@ -23,6 +23,38 @@ from .store import (
     upsert_model,
 )
 
+DETAILED_HELP = """\
+mq — Model Query CLI
+
+Common usage:
+  mq add <shortname> --provider <provider> <model> [--sysprompt ... | --sysprompt-file PATH]
+  mq models
+  mq ask <shortname> [-s/--sysprompt ...] [--json] [-n/--no-session] "<query>"
+  mq continue [--session <id>] [--json] "<query>"
+  mq cont [--session <id>] [--json] "<query>"
+  mq dump [--session <id>]
+  mq session list
+  mq session select <id>
+
+Notes:
+  - Each `mq ask` creates a new session under ~/.mq/sessions/ unless -n/--no-session is used.
+  - ~/.mq/last_conversation.json is maintained as a symlink/pointer to the latest session file.
+  - If a provider returns a reasoning trace, mq prints it before the response with a `response:` header.
+  - --json prints a single-line JSON object including at least `response` and `prompt`.
+
+Examples:
+  mq add gpt --provider openai gpt-4o-mini
+  mq ask gpt "Write a haiku about recursive functions"
+  mq ask -n gpt "quick question"
+  mq continue "Make it funnier"
+  mq session list
+  mq continue --session <id> "follow up"
+
+More:
+  mq help <command>   # show argparse help for a specific command
+  mq --help           # short help
+"""
+
 
 def _print_err(message: str) -> None:
     print(message, file=sys.stderr)
@@ -101,6 +133,9 @@ def _resolve_sysprompt(*, sysprompt: str | None, sysprompt_file: str | None) -> 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mq")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    help_cmd = sub.add_parser("help", help="Show detailed help")
+    help_cmd.add_argument("topic", nargs="?", help="Optional subcommand to show help for")
 
     add = sub.add_parser("add", help="Add/update a model shortname")
     add.add_argument("shortname")
@@ -313,11 +348,26 @@ def _cmd_session_select(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_help(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    topic = (getattr(args, "topic", None) or "").strip()
+    if not topic:
+        print(DETAILED_HELP, end="")
+        return 0
+    try:
+        # Re-parse with the requested subcommand and --help to leverage argparse output.
+        parser.parse_args([topic, "--help"])
+    except SystemExit as e:
+        return int(e.code) if isinstance(e.code, int) else 0
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     try:
         match args.command:
+            case "help":
+                return _cmd_help(args, parser)
             case "add":
                 return _cmd_add(args)
             case "models":
