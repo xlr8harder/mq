@@ -89,7 +89,7 @@ class MQCLITests(unittest.TestCase):
             self.assertEqual(rc, 2)
             self.assertIn("--sysprompt", err.getvalue())
 
-    def test_ask_overwrites_last_conversation(self):
+    def test_ask_creates_new_sessions_and_updates_latest(self):
         with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
 
@@ -100,10 +100,12 @@ class MQCLITests(unittest.TestCase):
                 self.assertEqual(rc, 0)
                 self.assertEqual(out.getvalue().strip(), "A1")
 
-            conv = store.load_last_conversation()
-            self.assertEqual(conv["model_shortname"], "m")
-            self.assertEqual([m["role"] for m in conv["messages"]], ["user", "assistant"])
-            self.assertEqual([m["content"] for m in conv["messages"]], ["Q1", "A1"])
+            sessions = store.list_sessions()
+            self.assertEqual(len(sessions), 1)
+            latest = store.load_latest_session()
+            self.assertEqual(latest["model_shortname"], "m")
+            self.assertEqual([m["role"] for m in latest["messages"]], ["user", "assistant"])
+            self.assertEqual([m["content"] for m in latest["messages"]], ["Q1", "A1"])
 
             with patch("mq.cli.chat", return_value=ChatResult(content="A2")):
                 out = io.StringIO()
@@ -112,8 +114,10 @@ class MQCLITests(unittest.TestCase):
                 self.assertEqual(rc, 0)
                 self.assertEqual(out.getvalue().strip(), "A2")
 
-            conv2 = store.load_last_conversation()
-            self.assertEqual([m["content"] for m in conv2["messages"]], ["Q2", "A2"])
+            sessions2 = store.list_sessions()
+            self.assertEqual(len(sessions2), 2)
+            latest2 = store.load_latest_session()
+            self.assertEqual([m["content"] for m in latest2["messages"]], ["Q2", "A2"])
 
     def test_continue_appends_and_cont_alias(self):
         with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
@@ -137,8 +141,9 @@ class MQCLITests(unittest.TestCase):
                 self.assertEqual(rc, 0)
                 self.assertEqual(out.getvalue().strip(), "A2")
 
-            conv = store.load_last_conversation()
-            self.assertEqual([m["content"] for m in conv["messages"]], ["Q1", "A1", "Q2", "A2"])
+            latest = store.load_latest_session()
+            self.assertEqual([m["content"] for m in latest["messages"]], ["Q1", "A1", "Q2", "A2"])
+            self.assertEqual(len(store.list_sessions()), 1)
 
     def test_sysprompt_override_persists_to_continue(self):
         with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
@@ -150,10 +155,10 @@ class MQCLITests(unittest.TestCase):
                     rc = cli.main(["ask", "m", "-s", "OVERRIDE", "Q1"])
                 self.assertEqual(rc, 0)
 
-            conv = store.load_last_conversation()
-            self.assertEqual(conv["sysprompt"], "OVERRIDE")
-            self.assertEqual(conv["messages"][0]["role"], "system")
-            self.assertEqual(conv["messages"][0]["content"], "OVERRIDE")
+            session = store.load_latest_session()
+            self.assertEqual(session["sysprompt"], "OVERRIDE")
+            self.assertEqual(session["messages"][0]["role"], "system")
+            self.assertEqual(session["messages"][0]["content"], "OVERRIDE")
 
             def fake_chat(provider, model_id, messages):
                 self.assertEqual(messages[0]["role"], "system")
@@ -166,9 +171,9 @@ class MQCLITests(unittest.TestCase):
                     rc = cli.main(["continue", "Q2"])
                 self.assertEqual(rc, 0)
 
-            conv2 = store.load_last_conversation()
-            self.assertEqual(conv2["sysprompt"], "OVERRIDE")
-            self.assertEqual([m["role"] for m in conv2["messages"]][-2:], ["user", "assistant"])
+            session2 = store.load_latest_session()
+            self.assertEqual(session2["sysprompt"], "OVERRIDE")
+            self.assertEqual([m["role"] for m in session2["messages"]][-2:], ["user", "assistant"])
 
     def test_dump_outputs_json(self):
         with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
@@ -184,6 +189,7 @@ class MQCLITests(unittest.TestCase):
             self.assertEqual(rc, 0)
             data = json.loads(out.getvalue())
             self.assertEqual(data["model_shortname"], "m")
+            self.assertIn("id", data)
 
     def test_rm_removes_shortname(self):
         with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
@@ -298,6 +304,41 @@ class MQCLITests(unittest.TestCase):
             self.assertIn("does not include full conversation context", err.getvalue())
             payload = json.loads(out.getvalue().strip())
             self.assertEqual(payload, {"response": "A2", "prompt": "Q2"})
+
+    def test_session_list_and_select_and_continue_session(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+            store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
+            with patch("mq.cli.chat", return_value=ChatResult(content="A1")):
+                out1 = io.StringIO()
+                with redirect_stdout(out1):
+                    cli.main(["ask", "m", "Q1"])
+            sid1 = store.load_latest_session()["id"]
+
+            with patch("mq.cli.chat", return_value=ChatResult(content="A2")):
+                out2 = io.StringIO()
+                with redirect_stdout(out2):
+                    cli.main(["ask", "m", "Q2"])
+            sid2 = store.load_latest_session()["id"]
+            self.assertNotEqual(sid1, sid2)
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                rc = cli.main(["session", "list"])
+            self.assertEqual(rc, 0)
+            self.assertIn(sid1, out.getvalue())
+            self.assertIn(sid2, out.getvalue())
+
+            rc = cli.main(["session", "select", sid1])
+            self.assertEqual(rc, 0)
+            self.assertEqual(store.load_latest_session()["id"], sid1)
+
+            with patch("mq.cli.chat", return_value=ChatResult(content="A3")):
+                out3 = io.StringIO()
+                with redirect_stdout(out3):
+                    cli.main(["continue", "--session", sid2, "Q3"])
+            self.assertEqual(store.load_latest_session()["id"], sid2)
+            s2 = store.load_session(sid2)
+            self.assertEqual([m["content"] for m in s2["messages"]][-2:], ["Q3", "A3"])
 
 
 if __name__ == "__main__":

@@ -10,13 +10,16 @@ from llm_client import get_provider
 from .errors import LLMError, MQError, UserError
 from .llm import chat
 from .store import (
-    CONVERSATION_VERSION,
     ensure_home,
+    create_session,
     get_model,
     list_models,
-    load_last_conversation,
+    list_sessions,
+    load_latest_session,
+    load_session,
     remove_model,
-    save_last_conversation,
+    save_session,
+    select_session,
     upsert_model,
 )
 
@@ -115,10 +118,12 @@ def _build_parser() -> argparse.ArgumentParser:
     ask.add_argument("query")
 
     cont = sub.add_parser("continue", aliases=["cont"], help="Continue the most recent conversation")
+    cont.add_argument("--session", help="Continue a specific session id (default: latest)")
     cont.add_argument("--json", action="store_true", help="Emit a single-line JSON object")
     cont.add_argument("query")
 
-    dump = sub.add_parser("dump", help="Dump the last conversation context as JSON")
+    dump = sub.add_parser("dump", help="Dump the latest session context as JSON")
+    dump.add_argument("--session", help="Dump a specific session id (default: latest)")
 
     rm = sub.add_parser("rm", help="Remove a configured model shortname")
     rm.add_argument("shortname")
@@ -131,6 +136,12 @@ def _build_parser() -> argparse.ArgumentParser:
     test.add_argument("--sysprompt-file", help="Read saved system prompt from file ('-' for stdin)")
     test.add_argument("--json", action="store_true", help="Emit a single-line JSON object")
     test.add_argument("query")
+
+    session = sub.add_parser("session", help="Manage sessions")
+    session_sub = session.add_subparsers(dest="session_command", required=True)
+    session_sub.add_parser("list", help="List sessions")
+    session_select = session_sub.add_parser("select", help="Select a session as latest")
+    session_select.add_argument("session_id")
 
     return parser
 
@@ -160,24 +171,6 @@ def _cmd_models(_: argparse.Namespace) -> int:
     return 0
 
 
-def _conversation_dict(
-    *,
-    model_shortname: str,
-    provider: str,
-    model: str,
-    sysprompt: str | None,
-    messages: list[dict],
-) -> dict:
-    return {
-        "version": CONVERSATION_VERSION,
-        "model_shortname": model_shortname,
-        "provider": provider,
-        "model": model,
-        "sysprompt": sysprompt,
-        "messages": messages,
-    }
-
-
 def _cmd_ask(args: argparse.Namespace) -> int:
     ensure_home()
     model_cfg = get_model(args.shortname)
@@ -200,24 +193,22 @@ def _cmd_ask(args: argparse.Namespace) -> int:
     )
 
     messages.append({"role": "assistant", "content": result.content})
-    save_last_conversation(
-        _conversation_dict(
-            model_shortname=args.shortname,
-            provider=provider,
-            model=model,
-            sysprompt=sysprompt,
-            messages=messages,
-        )
+    create_session(
+        model_shortname=args.shortname,
+        provider=provider,
+        model=model,
+        sysprompt=sysprompt,
+        messages=messages,
     )
     return 0
 
 
 def _cmd_continue(args: argparse.Namespace) -> int:
     ensure_home()
-    conv = load_last_conversation()
-    provider = conv.get("provider")
-    model = conv.get("model")
-    messages = conv.get("messages")
+    session = load_session(args.session) if args.session else load_latest_session()
+    provider = session.get("provider")
+    model = session.get("model")
+    messages = session.get("messages")
     if not isinstance(provider, str) or not isinstance(model, str) or not isinstance(messages, list):
         _print_err("Invalid last conversation format")
         return 2
@@ -234,19 +225,19 @@ def _cmd_continue(args: argparse.Namespace) -> int:
         reasoning=result.reasoning,
         json_mode=args.json,
         prompt=args.query,
-        sysprompt=conv.get("sysprompt") if isinstance(conv, dict) else None,
+        sysprompt=session.get("sysprompt") if isinstance(session, dict) else None,
     )
 
     messages.append({"role": "assistant", "content": result.content})
-    conv["messages"] = messages
-    save_last_conversation(conv)
+    session["messages"] = messages
+    save_session(session)
     return 0
 
 
-def _cmd_dump(_: argparse.Namespace) -> int:
+def _cmd_dump(args: argparse.Namespace) -> int:
     ensure_home()
-    conv = load_last_conversation()
-    print(json.dumps(conv, indent=2, ensure_ascii=False))
+    session = load_session(args.session) if args.session else load_latest_session()
+    print(json.dumps(session, indent=2, ensure_ascii=False))
     return 0
 
 
@@ -283,6 +274,41 @@ def _cmd_test(args: argparse.Namespace) -> int:
     return 0
 
 
+def _first_user_prompt(messages) -> str:
+    if not isinstance(messages, list):
+        return ""
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("role") == "user" and isinstance(msg.get("content"), str):
+            return msg["content"]
+    return ""
+
+
+def _cmd_session_list(_: argparse.Namespace) -> int:
+    ensure_home()
+    sessions = list_sessions()
+    if not sessions:
+        print("(no sessions)")
+        return 0
+    for s in sessions:
+        sid = s.get("id", "")
+        updated = s.get("updated_at") or s.get("created_at") or ""
+        shortname = s.get("model_shortname") or ""
+        first = _first_user_prompt(s.get("messages"))
+        first = first.replace("\n", " ")
+        if len(first) > 60:
+            first = first[:60] + "…"
+        print(f"{sid}\t{updated}\t{shortname}\t{first}")
+    return 0
+
+
+def _cmd_session_select(args: argparse.Namespace) -> int:
+    ensure_home()
+    select_session(args.session_id)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -302,6 +328,15 @@ def main(argv: list[str] | None = None) -> int:
                 return _cmd_rm(args)
             case "test":
                 return _cmd_test(args)
+            case "session":
+                match args.session_command:
+                    case "list":
+                        return _cmd_session_list(args)
+                    case "select":
+                        return _cmd_session_select(args)
+                    case _:
+                        _print_err(f"Unknown session command: {args.session_command}")
+                        return 2
             case _:
                 _print_err(f"Unknown command: {args.command}")
                 return 2

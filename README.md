@@ -53,6 +53,16 @@ mq dump
 If a provider returns a separate reasoning trace, `mq` prints it before the response, with a `response:` header separating them.
 Use `--json` to get a single-line JSON object on stdout including the query prompt: `{"response":"...","prompt":"...","reasoning":"..."}` (omit `reasoning`/`sysprompt` if absent).
 
+## Sessions
+
+Each `mq ask` creates a new session under `~/.mq/sessions/` and updates `~/.mq/sessions/latest`.
+
+```bash
+mq session list
+mq session select <id>
+mq continue --session <id> "follow up"
+```
+
 Override system prompt at query time:
 
 ```bash

@@ -41,15 +41,20 @@ On first use, `mq` creates a dotfile directory:
   - Schema (v1):
     - `version`: integer
     - `models`: map of shortname → `{ provider, model, sysprompt? }`
-- `~/.mq/last_conversation.json`
-  - The most recent conversation only.
+- `~/.mq/sessions/<id>.json`
+  - Each `mq ask` creates a new session file with a random id.
   - Schema (v1):
     - `version`: integer
+    - `id`: string
+    - `created_at`: string (UTC ISO-ish)
+    - `updated_at`: string (UTC ISO-ish)
     - `model_shortname`: string
     - `provider`: string
     - `model`: string
     - `sysprompt`: string | null
     - `messages`: list of OpenAI-style chat messages: `{ role, content }`
+- `~/.mq/sessions/latest`
+  - Symlink (or fallback pointer file) to the most recently used session.
 
 ### System prompt rules
 
@@ -88,8 +93,8 @@ mq ask <shortname> [--sysprompt/-s "..."] "<query>"
 
 Behavior:
 
-- Creates a new conversation from scratch (system prompt + user query).
-- Saves it as the only stored conversation (overwriting any previous).
+- Creates a new session from scratch (system prompt + user query).
+- Saves it under `~/.mq/sessions/<id>.json` and updates `~/.mq/sessions/latest`.
 - Prints the assistant response to stdout.
 
 ### `mq continue` / `mq cont`
@@ -103,8 +108,8 @@ mq cont "<query>"
 
 Behavior:
 
-- Loads `last_conversation.json`, appends the new user message, sends the full history.
-- Appends the assistant response and writes the updated conversation back to disk.
+- Loads the `latest` session (or `--session <id>`), appends the new user message, sends the full history.
+- Appends the assistant response and writes the updated session back to disk (and updates `latest`).
 
 ### `mq dump`
 
@@ -116,8 +121,17 @@ mq dump
 
 Behavior:
 
-- Prints `last_conversation.json` (human-readable JSON).
-- Exits non-zero if no prior conversation exists.
+- Prints the `latest` session JSON (or `--session <id>`).
+- Exits non-zero if no prior session exists.
+
+### `mq session`
+
+Manage sessions:
+
+```
+mq session list
+mq session select <id>
+```
 
 ### `mq rm`
 

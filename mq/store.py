@@ -3,13 +3,15 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
+import uuid
 from pathlib import Path
 from typing import Any
 
 from .errors import ConfigError, UserError
 
 CONFIG_VERSION = 1
-CONVERSATION_VERSION = 1
+SESSION_VERSION = 1
 
 
 def mq_home() -> Path:
@@ -31,6 +33,144 @@ def config_path() -> Path:
 
 def last_conversation_path() -> Path:
     return ensure_home() / "last_conversation.json"
+
+
+def sessions_dir() -> Path:
+    path = ensure_home() / "sessions"
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return path
+
+
+def latest_session_link_path() -> Path:
+    return sessions_dir() / "latest"
+
+
+def _now_iso() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _session_filename(session_id: str) -> str:
+    return f"{session_id}.json"
+
+
+def session_path(session_id: str) -> Path:
+    return sessions_dir() / _session_filename(session_id)
+
+
+def _set_latest_session(session_id: str) -> None:
+    link = latest_session_link_path()
+    target_name = _session_filename(session_id)
+    try:
+        if link.exists() or link.is_symlink():
+            link.unlink()
+        os.symlink(target_name, link)
+    except OSError:
+        # Fallback if symlinks are not available.
+        link.write_text(session_id + "\n", encoding="utf-8")
+
+
+def _resolve_latest_session_id() -> str:
+    link = latest_session_link_path()
+    if link.is_symlink():
+        try:
+            target = os.readlink(link)
+        except OSError:
+            target = ""
+        name = Path(target).name
+        if name.endswith(".json"):
+            return name[: -len(".json")]
+    if link.exists():
+        try:
+            session_id = link.read_text(encoding="utf-8").strip()
+            if session_id:
+                return session_id
+        except OSError:
+            pass
+
+    # No pointer: pick the newest session file.
+    candidates = sorted(
+        (p for p in sessions_dir().glob("*.json") if p.name != "latest.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if not candidates:
+        raise UserError("No previous conversation found")
+    return candidates[0].stem
+
+
+def create_session(*, model_shortname: str, provider: str, model: str, sysprompt: str | None, messages: list[dict]) -> str:
+    session_id = uuid.uuid4().hex
+    created_at = _now_iso()
+    data = {
+        "version": SESSION_VERSION,
+        "id": session_id,
+        "created_at": created_at,
+        "updated_at": created_at,
+        "model_shortname": model_shortname,
+        "provider": provider,
+        "model": model,
+        "sysprompt": sysprompt,
+        "messages": messages,
+    }
+    _write_json_atomic(session_path(session_id), data)
+    _set_latest_session(session_id)
+    return session_id
+
+
+def load_session(session_id: str) -> dict[str, Any]:
+    path = session_path(session_id)
+    try:
+        data = _read_json(path)
+    except FileNotFoundError as e:
+        raise UserError(f"Unknown session id: {session_id!r}") from e
+    if not isinstance(data, dict):
+        raise ConfigError(f"Invalid session format in {path}")
+    return data
+
+
+def save_session(session: dict[str, Any]) -> None:
+    session_id = session.get("id")
+    if not isinstance(session_id, str) or not session_id:
+        raise ConfigError("Invalid session (missing id)")
+    session["updated_at"] = _now_iso()
+    _write_json_atomic(session_path(session_id), session)
+    _set_latest_session(session_id)
+
+
+def load_latest_session() -> dict[str, Any]:
+    return load_session(_resolve_latest_session_id())
+
+
+def list_sessions() -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for path in sessions_dir().glob("*.json"):
+        if path.name == "latest.json":
+            continue
+        try:
+            data = _read_json(path)
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        session_id = data.get("id") or path.stem
+        if not isinstance(session_id, str):
+            continue
+        data = dict(data)
+        data["id"] = session_id
+        items.append(data)
+
+    def sort_key(d: dict[str, Any]) -> str:
+        updated = d.get("updated_at")
+        created = d.get("created_at")
+        return str(updated or created or "")
+
+    return sorted(items, key=sort_key, reverse=True)
+
+
+def select_session(session_id: str) -> None:
+    # Validate it exists first
+    _ = load_session(session_id)
+    _set_latest_session(session_id)
 
 
 def _read_json(path: Path) -> Any:
