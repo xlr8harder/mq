@@ -68,6 +68,7 @@ Input format: JSONL with a `prompt` field per row.
 ```bash
 mq batch gpt -i in.jsonl -o out.jsonl --workers 20
 mq batch gpt -i in.jsonl -o out.jsonl --prompt "You are terse." --extract-tags
+mq batch gpt -i in.jsonl -o out.jsonl -t 600 -r 5 --workers 50
 ```
 
 Behavior:
@@ -81,6 +82,7 @@ Behavior:
 - Output is written incrementally in completion order (unordered) to support large batch runs.
 - No sessions are created/updated.
 - If a row fails, it still produces an output row with `error` (and `error_info` when available), and the overall exit code is non-zero.
+- Request controls: `-t/--timeout-seconds` and `-r/--retries` apply per row; batch defaults are `-t 600` and `-r 5`.
 
 Tag extraction:
 

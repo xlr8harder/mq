@@ -75,6 +75,7 @@ Commands:
     - Output order is completion order (unordered) to support incremental streaming.
     - On row failure, writes `error` (and `error_info` when available); exits non-zero if any row failed.
     - Merge conflicts are fatal (e.g., an input row already contains `response`/`reasoning`/`error` keys, or `tag:*` when --extract-tags is enabled).
+    - Batch defaults are tuned for slower providers: timeout=600s, retries=5 (override with -t/-r).
 
   mq continue [--session <id>] [--json] "<query>"
   mq cont [--session <id>] [--json] "<query>"  (alias)
@@ -354,8 +355,20 @@ def _build_parser() -> argparse.ArgumentParser:
     batch.add_argument("--prompt", help="Prefix prompt (prepends input row prompt as an attachment)", default=None)
     batch.add_argument("--workers", type=_positive_int, default=20, help="Worker threads (default: 20)")
     batch.add_argument("--extract-tags", action="store_true", help="Extract <field>value</field> into `tag:field` keys")
-    batch.add_argument("-t", "--timeout-seconds", type=_positive_int, help="Request timeout in seconds (default: 600)")
-    batch.add_argument("-r", "--retries", type=_non_negative_int, help="Max retries for retryable errors (default: 3)")
+    batch.add_argument(
+        "-t",
+        "--timeout-seconds",
+        type=_positive_int,
+        default=600,
+        help="Request timeout in seconds (default: 600)",
+    )
+    batch.add_argument(
+        "-r",
+        "--retries",
+        type=_non_negative_int,
+        default=5,
+        help="Max retries for retryable errors (default: 5)",
+    )
 
     session = sub.add_parser("session", help="Manage sessions")
     session_sub = session.add_subparsers(dest="session_command", required=True)

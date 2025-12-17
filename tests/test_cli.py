@@ -556,6 +556,34 @@ class MQCLITests(unittest.TestCase):
             first = json.loads(lines[0])
             self.assertEqual(first["id"], 2)
 
+    def test_batch_timeout_and_retries_defaults_and_overrides(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+            store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
+            in_path = Path(td) / "in.jsonl"
+            out_path = Path(td) / "out.jsonl"
+            in_path.write_text(json.dumps({"id": 1, "prompt": "P"}) + "\n", encoding="utf-8")
+
+            seen = {}
+
+            def fake_chat(_provider, _model_id, _messages, **kwargs):
+                seen["timeout_seconds"] = kwargs.get("timeout_seconds")
+                seen["max_retries"] = kwargs.get("max_retries")
+                return ChatResult(content="R")
+
+            with patch("mq.cli.chat", side_effect=fake_chat):
+                rc = cli.main(["batch", "m", "-i", str(in_path), "-o", str(out_path)])
+            self.assertEqual(rc, 0)
+            self.assertEqual(seen["timeout_seconds"], 600)
+            self.assertEqual(seen["max_retries"], 5)
+
+            in_path.write_text(json.dumps({"id": 1, "prompt": "P"}) + "\n", encoding="utf-8")
+            seen = {}
+            with patch("mq.cli.chat", side_effect=fake_chat):
+                rc = cli.main(["batch", "m", "-i", str(in_path), "-o", str(out_path), "-t", "12", "-r", "0"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(seen["timeout_seconds"], 12)
+            self.assertEqual(seen["max_retries"], 0)
+
 
 class MQLLMControlsTests(unittest.TestCase):
     def test_llm_chat_defaults_timeout_and_retries(self):
