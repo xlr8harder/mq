@@ -1,5 +1,13 @@
 `mq` is a small CLI for querying configured LLM chat models via `llm_client`.
 
+## Overview
+
+- Configure model aliases (`mq add`) and query them from the terminal (`mq ask`).
+- Persist multi-turn conversations as sessions (`mq continue`, `mq session list/select/rename`).
+- Run ephemeral one-offs without creating sessions (`mq ask -n`).
+- Script-friendly output (`--json`) and shell ergonomics (`-` for stdin, `--attach` for files).
+- Thorough CLI documentation: `mq help` and `mq help <command...>`.
+
 ## Install
 
 From a git checkout:
@@ -48,6 +56,21 @@ API keys are read from environment variables (via `llm_client`):
 - `openai`: `OPENAI_API_KEY`
 - `openrouter`: `OPENROUTER_API_KEY`
 - `chutes`: `CHUTES_API_TOKEN`
+
+## Supported providers
+
+Provider names accepted by `--provider` (via `llm_client`):
+
+- `openai`
+- `openrouter`
+- `fireworks`
+- `chutes`
+- `google`
+- `tngtech`
+- `xai`
+- `moonshot`
+
+Run `mq help` for the most up-to-date usage and environment variable details.
 
 ## Configure a model shortname
 
