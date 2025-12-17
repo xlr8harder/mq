@@ -53,8 +53,8 @@ On first use, `mq` creates a dotfile directory:
     - `model`: string
     - `sysprompt`: string | null
     - `messages`: list of OpenAI-style chat messages: `{ role, content }`
-- `~/.mq/sessions/latest`
-  - Symlink (or fallback pointer file) to the most recently used session.
+- `~/.mq/last_conversation.json`
+  - Convenience symlink/pointer to the latest session file.
 
 ### System prompt rules
 
@@ -94,8 +94,12 @@ mq ask <shortname> [--sysprompt/-s "..."] "<query>"
 Behavior:
 
 - Creates a new session from scratch (system prompt + user query).
-- Saves it under `~/.mq/sessions/<id>.json` and updates `~/.mq/sessions/latest`.
+- Saves it under `~/.mq/sessions/<id>.json` and updates `~/.mq/last_conversation.json`.
 - Prints the assistant response to stdout.
+
+Options:
+
+- `-n/--no-session`: do not create a session or update `~/.mq/last_conversation.json` (one-off query).
 
 ### `mq continue` / `mq cont`
 

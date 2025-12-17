@@ -50,12 +50,19 @@ mq cont "Now in the style of Bash"
 mq dump
 ```
 
+One-off ask without creating a session:
+
+```bash
+mq ask -n gpt "quick question"
+```
+
 If a provider returns a separate reasoning trace, `mq` prints it before the response, with a `response:` header separating them.
 Use `--json` to get a single-line JSON object on stdout including the query prompt: `{"response":"...","prompt":"...","reasoning":"..."}` (omit `reasoning`/`sysprompt` if absent).
 
 ## Sessions
 
-Each `mq ask` creates a new session under `~/.mq/sessions/` and updates `~/.mq/sessions/latest`.
+Each `mq ask` creates a new session under `~/.mq/sessions/`.
+For convenience, `~/.mq/last_conversation.json` is maintained as a symlink/pointer to the latest session file.
 
 ```bash
 mq session list

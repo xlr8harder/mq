@@ -313,6 +313,8 @@ class MQCLITests(unittest.TestCase):
                 with redirect_stdout(out1):
                     cli.main(["ask", "m", "Q1"])
             sid1 = store.load_latest_session()["id"]
+            last_path = store.last_conversation_path()
+            self.assertTrue(last_path.exists() or last_path.is_symlink())
 
             with patch("mq.cli.chat", return_value=ChatResult(content="A2")):
                 out2 = io.StringIO()
@@ -320,6 +322,9 @@ class MQCLITests(unittest.TestCase):
                     cli.main(["ask", "m", "Q2"])
             sid2 = store.load_latest_session()["id"]
             self.assertNotEqual(sid1, sid2)
+            # last_conversation.json points at latest session (either symlink or pointer).
+            loaded = store.load_last_conversation()
+            self.assertEqual(loaded.get("id"), sid2)
 
             out = io.StringIO()
             with redirect_stdout(out):
@@ -339,6 +344,26 @@ class MQCLITests(unittest.TestCase):
             self.assertEqual(store.load_latest_session()["id"], sid2)
             s2 = store.load_session(sid2)
             self.assertEqual([m["content"] for m in s2["messages"]][-2:], ["Q3", "A3"])
+
+    def test_ask_no_session_does_not_create_or_update_latest(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+            store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
+            with patch("mq.cli.chat", return_value=ChatResult(content="A1")):
+                out1 = io.StringIO()
+                with redirect_stdout(out1):
+                    cli.main(["ask", "m", "Q1"])
+            sid1 = store.load_latest_session()["id"]
+            session_count = len(store.list_sessions())
+
+            with patch("mq.cli.chat", return_value=ChatResult(content="A2")):
+                out2 = io.StringIO()
+                with redirect_stdout(out2):
+                    rc = cli.main(["ask", "m", "-n", "Q2"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(out2.getvalue().strip(), "A2")
+            self.assertEqual(len(store.list_sessions()), session_count)
+            self.assertEqual(store.load_latest_session()["id"], sid1)
+            self.assertEqual(store.load_last_conversation().get("id"), sid1)
 
 
 if __name__ == "__main__":

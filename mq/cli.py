@@ -115,6 +115,7 @@ def _build_parser() -> argparse.ArgumentParser:
     ask.add_argument("shortname")
     ask.add_argument("--sysprompt", "-s", help="Override system prompt for this run")
     ask.add_argument("--json", action="store_true", help="Emit a single-line JSON object")
+    ask.add_argument("-n", "--no-session", action="store_true", help="Do not create or update a session")
     ask.add_argument("query")
 
     cont = sub.add_parser("continue", aliases=["cont"], help="Continue the most recent conversation")
@@ -191,6 +192,9 @@ def _cmd_ask(args: argparse.Namespace) -> int:
         prompt=args.query,
         sysprompt=sysprompt,
     )
+
+    if args.no_session:
+        return 0
 
     messages.append({"role": "assistant", "content": result.content})
     create_session(

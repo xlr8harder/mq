@@ -41,10 +41,6 @@ def sessions_dir() -> Path:
     return path
 
 
-def latest_session_link_path() -> Path:
-    return sessions_dir() / "latest"
-
-
 def _now_iso() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
@@ -58,44 +54,38 @@ def session_path(session_id: str) -> Path:
 
 
 def _set_latest_session(session_id: str) -> None:
-    link = latest_session_link_path()
     target_name = _session_filename(session_id)
+    last = last_conversation_path()
     try:
-        if link.exists() or link.is_symlink():
-            link.unlink()
-        os.symlink(target_name, link)
+        if last.exists() or last.is_symlink():
+            last.unlink()
+        os.symlink(str(Path("sessions") / target_name), last)
     except OSError:
         # Fallback if symlinks are not available.
-        link.write_text(session_id + "\n", encoding="utf-8")
-
-
-def _resolve_latest_session_id() -> str:
-    link = latest_session_link_path()
-    if link.is_symlink():
         try:
-            target = os.readlink(link)
+            last.write_text(session_id + "\n", encoding="utf-8")
+        except OSError:
+            pass
+
+
+def _read_latest_session_id_from_last_conversation() -> str | None:
+    last = last_conversation_path()
+    if last.is_symlink():
+        try:
+            target = os.readlink(last)
         except OSError:
             target = ""
         name = Path(target).name
         if name.endswith(".json"):
             return name[: -len(".json")]
-    if link.exists():
+    if last.exists():
         try:
-            session_id = link.read_text(encoding="utf-8").strip()
-            if session_id:
-                return session_id
+            text = last.read_text(encoding="utf-8").strip()
         except OSError:
-            pass
-
-    # No pointer: pick the newest session file.
-    candidates = sorted(
-        (p for p in sessions_dir().glob("*.json") if p.name != "latest.json"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-    if not candidates:
-        raise UserError("No previous conversation found")
-    return candidates[0].stem
+            text = ""
+        if text:
+            return text
+    return None
 
 
 def create_session(*, model_shortname: str, provider: str, model: str, sysprompt: str | None, messages: list[dict]) -> str:
@@ -138,14 +128,38 @@ def save_session(session: dict[str, Any]) -> None:
 
 
 def load_latest_session() -> dict[str, Any]:
-    return load_session(_resolve_latest_session_id())
+    # Fast path: ~/.mq/last_conversation.json is maintained as a symlink/pointer
+    # to the latest session file. Reading it avoids any sessions/ directory scan.
+    last = last_conversation_path()
+    if last.exists() or last.is_symlink():
+        try:
+            data = _read_json(last)
+            if isinstance(data, dict) and isinstance(data.get("id"), str) and data.get("id"):
+                return data
+        except Exception:
+            pass
+
+    session_id = _read_latest_session_id_from_last_conversation()
+    if session_id:
+        try:
+            return load_session(session_id)
+        except UserError:
+            pass
+
+    # Last resort: pick the newest session file.
+    candidates = sorted(
+        (p for p in sessions_dir().glob("*.json")),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if not candidates:
+        raise UserError("No previous conversation found")
+    return load_session(candidates[0].stem)
 
 
 def list_sessions() -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for path in sessions_dir().glob("*.json"):
-        if path.name == "latest.json":
-            continue
         try:
             data = _read_json(path)
         except Exception:
@@ -283,14 +297,17 @@ def remove_model(shortname: str) -> None:
 
 
 def load_last_conversation() -> dict[str, Any]:
+    # Back-compat: historically this was a real JSON file. Now we keep it as a
+    # symlink/pointer to the latest session for convenience.
     path = last_conversation_path()
-    try:
-        data = _read_json(path)
-    except FileNotFoundError as e:
-        raise UserError("No previous conversation found") from e
-    if not isinstance(data, dict):
-        raise ConfigError(f"Invalid conversation format in {path}")
-    return data
+    if path.exists() or path.is_symlink():
+        try:
+            data = _read_json(path)
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            pass
+    return load_latest_session()
 
 
 def save_last_conversation(conversation: dict[str, Any]) -> None:
