@@ -87,6 +87,9 @@ Provider API keys (environment variables, via llm_client):
 Request controls:
   - -t/--timeout-seconds N  (default: 600)
   - -r/--retries N          (default: 3)
+
+stdin:
+  - For ask/continue/test, pass "-" as the query to read the full prompt from stdin.
 """
 
 
@@ -168,6 +171,12 @@ def _resolve_sysprompt(*, sysprompt: str | None, sysprompt_file: str | None) -> 
         content = _read_sysprompt_file(sysprompt_file)
         return content.rstrip("\n")
     return sysprompt
+
+
+def _resolve_query(query: str) -> str:
+    if query == "-":
+        return sys.stdin.read().rstrip("\n")
+    return query
 
 
 def _positive_int(text: str) -> int:
@@ -282,7 +291,8 @@ def _cmd_ask(args: argparse.Namespace) -> int:
     messages: list[dict] = []
     if sysprompt:
         messages.append({"role": "system", "content": sysprompt})
-    messages.append({"role": "user", "content": args.query})
+    query = _resolve_query(args.query)
+    messages.append({"role": "user", "content": query})
 
     result = chat(provider, model, messages, timeout_seconds=args.timeout_seconds, max_retries=args.retries)
 
@@ -293,7 +303,7 @@ def _cmd_ask(args: argparse.Namespace) -> int:
             response=result.content,
             reasoning=result.reasoning,
             json_mode=args.json,
-            prompt=args.query,
+            prompt=query,
             sysprompt=sysprompt,
             session_id="(none)" if not args.json else None,
         )
@@ -312,7 +322,7 @@ def _cmd_ask(args: argparse.Namespace) -> int:
         response=result.content,
         reasoning=result.reasoning,
         json_mode=args.json,
-        prompt=args.query,
+        prompt=query,
         sysprompt=sysprompt,
         session_id=session_id,
     )
@@ -333,7 +343,8 @@ def _cmd_continue(args: argparse.Namespace) -> int:
         _print_err("warning: --json output does not include full conversation context (use `mq dump` for history)")
 
     messages = list(messages)
-    messages.append({"role": "user", "content": args.query})
+    query = _resolve_query(args.query)
+    messages.append({"role": "user", "content": query})
 
     result = chat(provider, model, messages, timeout_seconds=args.timeout_seconds, max_retries=args.retries)
     messages.append({"role": "assistant", "content": result.content})
@@ -343,7 +354,7 @@ def _cmd_continue(args: argparse.Namespace) -> int:
         response=result.content,
         reasoning=result.reasoning,
         json_mode=args.json,
-        prompt=args.query,
+        prompt=query,
         sysprompt=session.get("sysprompt") if isinstance(session, dict) else None,
         session_id=session.get("id") if isinstance(session.get("id"), str) else None,
     )
@@ -375,14 +386,15 @@ def _cmd_test(args: argparse.Namespace) -> int:
     sysprompt = _resolve_sysprompt(sysprompt=args.sysprompt, sysprompt_file=args.sysprompt_file)
     if sysprompt:
         messages.append({"role": "system", "content": sysprompt})
-    messages.append({"role": "user", "content": args.query})
+    query = _resolve_query(args.query)
+    messages.append({"role": "user", "content": query})
 
     result = chat(args.provider, args.model, messages, timeout_seconds=args.timeout_seconds, max_retries=args.retries)
     _emit_result(
         response=result.content,
         reasoning=result.reasoning,
         json_mode=args.json,
-        prompt=args.query,
+        prompt=query,
         sysprompt=sysprompt,
     )
 

@@ -479,6 +479,22 @@ class MQLLMControlsTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertTrue(out.getvalue().strip().endswith("OK"))
 
+    def test_query_dash_reads_from_stdin(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+            store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
+
+            def fake_chat(provider, model_id, messages, **_kwargs):
+                self.assertEqual(messages[-1]["role"], "user")
+                self.assertEqual(messages[-1]["content"], "FROM STDIN")
+                return ChatResult(content="OK")
+
+            out = io.StringIO()
+            stdin = io.StringIO("FROM STDIN\n")
+            with patch("mq.cli.chat", side_effect=fake_chat), patch("sys.stdin", stdin), redirect_stdout(out):
+                rc = cli.main(["ask", "m", "-n", "-"])
+            self.assertEqual(rc, 0)
+            self.assertTrue(out.getvalue().strip().endswith("OK"))
+
     def test_session_rename_updates_latest_pointer(self):
         with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)

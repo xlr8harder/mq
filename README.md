@@ -90,6 +90,7 @@ One-off ask without creating a session:
 
 ```bash
 mq ask -n gpt "quick question"
+echo "prompt from stdin" | mq ask -n gpt -
 ```
 
 Override request controls:
