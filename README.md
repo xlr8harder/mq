@@ -31,6 +31,7 @@ Test a configuration before saving:
 
 ```bash
 mq test gpt --provider openai gpt-4o-mini "hello"
+mq test gpt --provider openai gpt-4o-mini --save "hello"  # save on success
 ```
 
 Configuration is stored under `~/.mq/` by default (override with `MQ_HOME=/path`).

@@ -164,13 +164,14 @@ def _build_parser() -> argparse.ArgumentParser:
     rm = sub.add_parser("rm", help="Remove a configured model shortname")
     rm.add_argument("shortname")
 
-    test = sub.add_parser("test", help="Test a provider/model configuration and (on success) save it")
+    test = sub.add_parser("test", help="Test a provider/model configuration (optionally save with --save)")
     test.add_argument("shortname")
     test.add_argument("--provider", required=True, help="Provider name (llm_client)")
     test.add_argument("model", help="Full model identifier")
     test.add_argument("--sysprompt", help="Saved system prompt for this model")
     test.add_argument("--sysprompt-file", help="Read saved system prompt from file ('-' for stdin)")
     test.add_argument("--json", action="store_true", help="Emit a single-line JSON object")
+    test.add_argument("--save", action="store_true", help="Save/overwrite this shortname on success")
     test.add_argument("query")
 
     session = sub.add_parser("session", help="Manage sessions")
@@ -309,7 +310,8 @@ def _cmd_test(args: argparse.Namespace) -> int:
         sysprompt=sysprompt,
     )
 
-    upsert_model(args.shortname, args.provider, args.model, sysprompt)
+    if args.save:
+        upsert_model(args.shortname, args.provider, args.model, sysprompt)
     return 0
 
 

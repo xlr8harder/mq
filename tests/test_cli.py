@@ -204,12 +204,23 @@ class MQCLITests(unittest.TestCase):
             with patch("mq.cli.chat", return_value=ChatResult(content="OK")):
                 out = io.StringIO()
                 with redirect_stdout(out):
-                    rc = cli.main(["test", "m", "--provider", "openai", "gpt-4o-mini", "hello"])
+                    rc = cli.main(["test", "m", "--provider", "openai", "gpt-4o-mini", "--save", "hello"])
             self.assertEqual(rc, 0)
             self.assertEqual(out.getvalue().strip(), "OK")
             entry = store.get_model("m")
             self.assertEqual(entry["provider"], "openai")
             self.assertEqual(entry["model"], "gpt-4o-mini")
+
+    def test_test_command_does_not_save_by_default(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+            with patch("mq.cli.chat", return_value=ChatResult(content="OK")):
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    rc = cli.main(["test", "m", "--provider", "openai", "gpt-4o-mini", "hello"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(out.getvalue().strip(), "OK")
+            with self.assertRaises(UserError):
+                store.get_model("m")
 
     def test_llm_errors_print_diagnostics(self):
         with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):

@@ -151,6 +151,7 @@ Test a provider/model configuration (and save it on success):
 
 ```
 mq test <shortname> --provider <providername> <full/model-name> [--sysprompt "..."] "<query>"
+mq test <shortname> --provider <providername> <full/model-name> [--sysprompt "..."] --save "<query>"
 ```
 
 ## Error Handling
