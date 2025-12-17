@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import unittest
+from threading import Event
 from pathlib import Path
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
@@ -518,6 +519,42 @@ class MQCLITests(unittest.TestCase):
             self.assertEqual(rc, 2)
             self.assertIn("merge conflict", err.getvalue())
             self.assertFalse(out_path.exists())
+
+    def test_batch_output_is_completion_order_unordered(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+            store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
+            in_path = Path(td) / "in.jsonl"
+            out_path = Path(td) / "out.jsonl"
+            in_path.write_text(
+                "\n".join(
+                    [
+                        json.dumps({"id": 1, "prompt": "P1"}),
+                        json.dumps({"id": 2, "prompt": "P2"}),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            allow_p1 = Event()
+
+            def fake_chat(_provider, _model_id, messages, **_kwargs):
+                content = messages[-1]["content"]
+                if "P1" in content:
+                    allow_p1.wait(timeout=2)
+                    return ChatResult(content="R1")
+                if "P2" in content:
+                    allow_p1.set()
+                    return ChatResult(content="R2")
+                raise AssertionError(f"unexpected prompt: {content!r}")
+
+            with patch("mq.cli.chat", side_effect=fake_chat):
+                rc = cli.main(["batch", "m", "-i", str(in_path), "-o", str(out_path), "--workers", "2"])
+            self.assertEqual(rc, 0)
+            lines = [l for l in out_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+            self.assertEqual(len(lines), 2)
+            first = json.loads(lines[0])
+            self.assertEqual(first["id"], 2)
 
 
 class MQLLMControlsTests(unittest.TestCase):

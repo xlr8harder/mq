@@ -78,7 +78,7 @@ Behavior:
   - `prompt` (the exact prompt sent to the model, including any `--prompt` prefix formatting)
   - `sysprompt` (if set)
   - `reasoning` (if returned by the provider)
-- Output order matches input order, even though requests run concurrently.
+- Output is written incrementally in completion order (unordered) to support large batch runs.
 - No sessions are created/updated.
 - If a row fails, it still produces an output row with `error` (and `error_info` when available), and the overall exit code is non-zero.
 
