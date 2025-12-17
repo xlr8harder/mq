@@ -2,9 +2,9 @@
 
 ## Overview
 
-- Configure model aliases (`mq add`) and query them from the terminal (`mq ask`).
+- Configure model aliases (`mq add`) and query them from the terminal (`mq query`).
 - Persist multi-turn conversations as sessions (`mq continue`, `mq session list/select/rename`).
-- Run ephemeral one-offs without creating sessions (`mq ask -n`).
+- Run ephemeral one-offs without creating sessions (`mq query -n`).
 - Script-friendly output (`--json`) and shell ergonomics (`-` for stdin, `--attach` for files).
 - Thorough CLI documentation: `mq help` and `mq help <command...>`.
 
@@ -14,7 +14,7 @@ Configure a model shortname and ask a question:
 
 ```bash
 mq add gpt --provider openai gpt-4o-mini
-mq ask gpt "Write a haiku about recursive functions"
+mq query gpt "Write a haiku about recursive functions"
 ```
 
 Continue the most recent session:
@@ -22,12 +22,13 @@ Continue the most recent session:
 ```bash
 mq continue "Make it funnier"
 mq cont "Now in the style of Bash"
+mq c "Even shorter continue alias"
 ```
 
 Create and name a session (collision = error):
 
 ```bash
-mq ask gpt --session work "Start a tracked conversation"
+mq query gpt --session work "Start a tracked conversation"
 mq continue --session work "Follow up on that"
 mq session rename work work-notes
 ```
@@ -42,31 +43,33 @@ mq session select <id>
 Ephemeral one-off (no session file, no pointer update):
 
 ```bash
-mq ask -n gpt "quick question"
+mq query -n gpt "quick question"
 ```
 
 Shell ergonomics: stdin prompt + attachments:
 
 ```bash
-echo "prompt from stdin" | mq ask -n gpt -
-mq ask -n gpt --attach README.md "Summarize this repo"
-cat README.md | mq ask -n gpt --attach - "Summarize the attached file"
+echo "prompt from stdin" | mq query -n gpt -
+mq query -n gpt --attach README.md "Summarize this repo"
+cat README.md | mq query -n gpt --attach - "Summarize the attached file"
 ```
 
 Script-friendly JSON output:
 
 ```bash
-mq ask gpt --json "Return 3 bullet points"
+mq query gpt --json "Return 3 bullet points"
 mq continue --json "Now add a short summary"
 ```
 
 Tune request behavior:
 
-- `-t/--timeout-seconds`: request timeout (seconds), default `600`
-- `-r/--retries`: max retries for retryable errors, default `3`
+- `-t/--timeout-seconds`: per-request timeout (seconds), default `600`
+- `-r/--retries`: max retry attempts for transient errors, default `3`
+
+`-t` applies to each request attempt; `-r` controls how many additional attempts are made when `llm_client` considers an error retryable.
 
 ```bash
-mq ask gpt -t 600 -r 3 "slow question"
+mq query gpt -t 600 -r 3 "slow question"
 ```
 
 ## Install
@@ -91,10 +94,12 @@ Everything should be discoverable from the CLI:
 
 ```bash
 mq help
-mq help ask
+mq help query
 mq help session list
 mq --help
 ```
+
+Note: `mq ask` is supported as an alias for `mq query` (examples use `query`).
 
 ## Dev / run locally
 
@@ -161,28 +166,28 @@ Remove a configured shortname:
 mq rm gpt
 ```
 
-## Ask / continue / dump
+## Query / continue / dump
 
 ```bash
-mq ask gpt "Write a haiku about recursive functions"
+mq query gpt "Write a haiku about recursive functions"
 mq continue "Make it funnier"
-mq cont "Now in the style of Bash"
+mq c "Now in the style of Bash"
 mq dump
 ```
 
 One-off ask without creating a session:
 
 ```bash
-mq ask -n gpt "quick question"
-echo "prompt from stdin" | mq ask -n gpt -
-mq ask -n gpt --attach README.md "Summarize this repo"
-cat README.md | mq ask -n gpt --attach - "Summarize the attached file"
+mq query -n gpt "quick question"
+echo "prompt from stdin" | mq query -n gpt -
+mq query -n gpt --attach README.md "Summarize this repo"
+cat README.md | mq query -n gpt --attach - "Summarize the attached file"
 ```
 
 Override request controls:
 
 ```bash
-mq ask gpt -t 600 -r 3 "slow question"
+mq query gpt -t 600 -r 3 "slow question"
 ```
 
 If a provider returns a separate reasoning trace, `mq` prints it before the response, with a `response:` header separating them.
@@ -190,7 +195,7 @@ Use `--json` to get a single-line JSON object on stdout including the query prom
 
 ## Sessions
 
-Each `mq ask` creates a new session under `~/.mq/sessions/`.
+Each `mq query` creates a new session under `~/.mq/sessions/`.
 For convenience, `~/.mq/last_conversation.json` is maintained as a symlink/pointer to the latest session file.
 
 ```bash
@@ -203,5 +208,5 @@ mq continue --session <id> "follow up"
 Override system prompt at query time:
 
 ```bash
-mq ask gpt -s "You are terse and technical." "Explain monads"
+mq query gpt -s "You are terse and technical." "Explain monads"
 ```

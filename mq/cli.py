@@ -30,7 +30,7 @@ mq — Model Query CLI
 
 Quickstart:
   mq add gpt --provider openai gpt-4o-mini
-  mq ask gpt "Write a haiku about recursive functions"
+  mq query gpt "Write a haiku about recursive functions"
   mq continue "Make it funnier"
 
 Configuration:
@@ -42,7 +42,7 @@ Configuration:
 Commands:
   mq help [topic...]
     - mq help              (this page)
-    - mq help ask          (subcommand help)
+    - mq help query        (subcommand help)
     - mq help session list (nested help)
 
   mq add <shortname> --provider <provider> <model> [--sysprompt ... | --sysprompt-file PATH]
@@ -55,14 +55,17 @@ Commands:
   mq models
     - Lists configured shortnames.
 
-  mq ask <shortname> [-s/--sysprompt ...] [--json] [-n/--no-session] [--session <id>] "<query>"
+  mq query <shortname> [-s/--sysprompt ...] [--json] [-n/--no-session] [--session <id>] "<query>"
+  mq ask <shortname> ...          (alias for `mq query`)
+  mq q <shortname> ...            (short alias for `mq query`)
     - Runs a one-off query against a configured model.
     - By default creates a new session and prints `session: <id>` first.
     - Use -n/--no-session for ephemeral asks (no session file, no pointer update).
     - Use --session <id> to create a named session (collision = error).
 
   mq continue [--session <id>] [--json] "<query>"
-  mq cont [--session <id>] [--json] "<query>"
+  mq cont [--session <id>] [--json] "<query>"  (alias)
+  mq c [--session <id>] [--json] "<query>"     (short alias)
     - Continues a prior session (default: latest).
 
   mq dump [--session <id>]
@@ -88,9 +91,10 @@ Provider API keys (environment variables, via llm_client):
 Request controls:
   - -t/--timeout-seconds N  (default: 600)
   - -r/--retries N          (default: 3)
+  - Timeout applies per request attempt; retries control how many additional attempts are made for retryable errors.
 
 stdin:
-  - For ask/continue/test, pass "-" as the query to read the full prompt from stdin.
+  - For query/continue/test, pass "-" as the query to read the full prompt from stdin.
   - Use --attach PATH to append file contents into the prompt (repeatable; PATH may be "-").
   - stdin can only be consumed once, so you can't combine query "-" with --attach "-".
 """
@@ -245,18 +249,18 @@ def _build_parser() -> argparse.ArgumentParser:
 
     models = sub.add_parser("models", help="List configured models")
 
-    ask = sub.add_parser("ask", help="Ask a configured model")
-    ask.add_argument("shortname")
-    ask.add_argument("--sysprompt", "-s", help="Override system prompt for this run")
-    ask.add_argument("--json", action="store_true", help="Emit a single-line JSON object")
-    ask.add_argument("-n", "--no-session", action="store_true", help="Do not create or update a session")
-    ask.add_argument("--session", help="Create a new named session id (collision = error)")
-    ask.add_argument("--attach", action="append", help="Append file content to the prompt ('-' for stdin)", default=[])
-    ask.add_argument("-t", "--timeout-seconds", type=_positive_int, help="Request timeout in seconds (default: 600)")
-    ask.add_argument("-r", "--retries", type=_non_negative_int, help="Max retries for retryable errors (default: 3)")
-    ask.add_argument("query")
+    query = sub.add_parser("query", aliases=["ask", "q"], help="Query a configured model")
+    query.add_argument("shortname")
+    query.add_argument("--sysprompt", "-s", help="Override system prompt for this run")
+    query.add_argument("--json", action="store_true", help="Emit a single-line JSON object")
+    query.add_argument("-n", "--no-session", action="store_true", help="Do not create or update a session")
+    query.add_argument("--session", help="Create a new named session id (collision = error)")
+    query.add_argument("--attach", action="append", help="Append file content to the prompt ('-' for stdin)", default=[])
+    query.add_argument("-t", "--timeout-seconds", type=_positive_int, help="Request timeout in seconds (default: 600)")
+    query.add_argument("-r", "--retries", type=_non_negative_int, help="Max retries for retryable errors (default: 3)")
+    query.add_argument("query")
 
-    cont = sub.add_parser("continue", aliases=["cont"], help="Continue the most recent conversation")
+    cont = sub.add_parser("continue", aliases=["cont", "c"], help="Continue the most recent conversation")
     cont.add_argument("--session", help="Continue a specific session id (default: latest)")
     cont.add_argument("--json", action="store_true", help="Emit a single-line JSON object")
     cont.add_argument("--attach", action="append", help="Append file content to the prompt ('-' for stdin)", default=[])
@@ -320,7 +324,7 @@ def _cmd_models(_: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_ask(args: argparse.Namespace) -> int:
+def _cmd_query(args: argparse.Namespace) -> int:
     ensure_home()
     model_cfg = get_model(args.shortname)
     provider = model_cfg["provider"]
@@ -525,9 +529,9 @@ def main(argv: list[str] | None = None) -> int:
                 return _cmd_add(args)
             case "models":
                 return _cmd_models(args)
-            case "ask":
-                return _cmd_ask(args)
-            case "continue" | "cont":
+            case "query" | "ask" | "q":
+                return _cmd_query(args)
+            case "continue" | "cont" | "c":
                 return _cmd_continue(args)
             case "dump":
                 return _cmd_dump(args)

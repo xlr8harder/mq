@@ -4,8 +4,8 @@
 
 `mq` is a small command-line tool for querying LLM chat models via the `llm_client` library. It supports:
 
-- Asking a model a one-off question (`mq ask …`)
-- Continuing the most recent conversation (`mq continue …` / `mq cont …`)
+- Querying a configured model (`mq query …`, alias: `mq ask …`, short: `mq q …`)
+- Continuing a conversation (`mq continue …` / `mq cont …` / `mq c …`)
 - Dumping the most recent conversation context (`mq dump`)
 - Managing a local registry of model shortnames (`mq add …`, `mq models`)
 - Removing model shortnames (`mq rm …`)
@@ -13,14 +13,14 @@
 
 ## Goals
 
-- Fast CLI for “ask/continue” workflows.
+- Fast CLI for “query/continue” workflows.
 - Simple local configuration with model shortnames.
-- Store only the most recent conversation, overwriting on every non-continue run.
+- Persist conversations as session files and maintain a pointer to the latest session.
 - Minimal dependencies; use `llm_client` for provider integration.
 
 ## Non-goals (for MVP)
 
-- Storing multiple named conversations.
+- Pruning/garbage-collecting old sessions.
 - Token-by-token streaming output.
 - Rich TUI, pagination, or editor integrations.
 - Provider-specific advanced options beyond model + system prompt.
@@ -42,7 +42,7 @@ On first use, `mq` creates a dotfile directory:
     - `version`: integer
     - `models`: map of shortname → `{ provider, model, sysprompt? }`
 - `~/.mq/sessions/<id>.json`
-  - Each `mq ask` creates a new session file with a random id.
+  - Each `mq query` creates a new session file with a random id.
   - Schema (v1):
     - `version`: integer
     - `id`: string
@@ -59,7 +59,7 @@ On first use, `mq` creates a dotfile directory:
 ### System prompt rules
 
 - A model can have a saved `sysprompt` in `mq add`.
-- `mq ask` can override system prompt per-run with `--sysprompt/-s`.
+- `mq query` can override system prompt per-run with `--sysprompt/-s`.
 - The system prompt used for a conversation is persisted into `last_conversation.json`.
 - `mq continue` uses the persisted system prompt and full message history from the last conversation.
 
@@ -83,12 +83,12 @@ Notes:
 
 List configured model shortnames and their provider/model identifiers.
 
-### `mq ask`
+### `mq query` (alias: `mq ask`, short: `mq q`)
 
 Query a configured model:
 
 ```
-mq ask <shortname> [--sysprompt/-s "..."] "<query>"
+mq query <shortname> [--sysprompt/-s "..."] "<query>"
 ```
 
 Behavior:
@@ -104,13 +104,14 @@ Options:
 - `--attach <path>`: append file contents into the prompt (repeatable; use `-` for stdin).
 - If the query is exactly `-`, read the prompt from stdin.
 
-### `mq continue` / `mq cont`
+### `mq continue` / `mq cont` / `mq c`
 
 Continue the most recent conversation:
 
 ```
 mq continue "<query>"
 mq cont "<query>"
+mq c "<query>"
 ```
 
 Behavior:
@@ -178,7 +179,7 @@ Options:
   - Config creation and read/write round-trips
   - Model registry add/list behavior
   - Conversation overwrite vs continue append semantics
-  - CLI argument parsing for `ask`, `continue/cont`, `dump`, `add`
+  - CLI argument parsing for `query`, `continue/cont`, `dump`, `add`
 - Tests must not touch the real home directory; use `MQ_HOME` with a temp directory.
 
 ## Future Enhancements
