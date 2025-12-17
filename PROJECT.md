@@ -101,6 +101,8 @@ Options:
 
 - `-n/--no-session`: do not create a session or update `~/.mq/last_conversation.json` (one-off query).
 - `--session <id>`: create a named session id (collision = error).
+- `--attach <path>`: append file contents into the prompt (repeatable; use `-` for stdin).
+- If the query is exactly `-`, read the prompt from stdin.
 
 ### `mq continue` / `mq cont`
 
@@ -115,6 +117,7 @@ Behavior:
 
 - Loads the `latest` session (or `--session <id>`), appends the new user message, sends the full history.
 - Appends the assistant response and writes the updated session back to disk (and updates `latest`).
+- `--attach <path>` appends file contents into the prompt; query `-` reads from stdin.
 
 ### `mq dump`
 
@@ -155,6 +158,11 @@ Test a provider/model configuration (and save it on success):
 mq test <shortname> --provider <providername> <full/model-name> [--sysprompt "..."] "<query>"
 mq test <shortname> --provider <providername> <full/model-name> [--sysprompt "..."] --save "<query>"
 ```
+
+Options:
+
+- `--attach <path>`: append file contents into the prompt (repeatable; use `-` for stdin).
+- If the query is exactly `-`, read the prompt from stdin.
 
 ## Error Handling
 

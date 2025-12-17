@@ -91,7 +91,8 @@ Request controls:
 
 stdin:
   - For ask/continue/test, pass "-" as the query to read the full prompt from stdin.
-  - Use --attach PATH to append file contents into the prompt (PATH may be "-").
+  - Use --attach PATH to append file contents into the prompt (repeatable; PATH may be "-").
+  - stdin can only be consumed once, so you can't combine query "-" with --attach "-".
 """
 
 
