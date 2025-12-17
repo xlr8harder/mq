@@ -8,6 +8,67 @@
 - Script-friendly output (`--json`) and shell ergonomics (`-` for stdin, `--attach` for files).
 - Thorough CLI documentation: `mq help` and `mq help <command...>`.
 
+## Examples
+
+Configure a model shortname and ask a question:
+
+```bash
+mq add gpt --provider openai gpt-4o-mini
+mq ask gpt "Write a haiku about recursive functions"
+```
+
+Continue the most recent session:
+
+```bash
+mq continue "Make it funnier"
+mq cont "Now in the style of Bash"
+```
+
+Create and name a session (collision = error):
+
+```bash
+mq ask gpt --session work "Start a tracked conversation"
+mq continue --session work "Follow up on that"
+mq session rename work work-notes
+```
+
+List/select sessions:
+
+```bash
+mq session list
+mq session select <id>
+```
+
+Ephemeral one-off (no session file, no pointer update):
+
+```bash
+mq ask -n gpt "quick question"
+```
+
+Shell ergonomics: stdin prompt + attachments:
+
+```bash
+echo "prompt from stdin" | mq ask -n gpt -
+mq ask -n gpt --attach README.md "Summarize this repo"
+cat README.md | mq ask -n gpt --attach - "Summarize the attached file"
+```
+
+Script-friendly JSON output:
+
+```bash
+mq ask gpt --json "Return 3 bullet points"
+mq continue --json "Now add a short summary"
+```
+
+Tune request behavior:
+
+- `-t/--timeout-seconds`: request timeout (seconds), default `600`
+- `-r/--retries`: max retries for retryable errors, default `3`
+
+```bash
+mq ask gpt -t 600 -r 3 "slow question"
+```
+
 ## Install
 
 From a git checkout:
