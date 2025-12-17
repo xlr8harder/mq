@@ -495,6 +495,42 @@ class MQLLMControlsTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertTrue(out.getvalue().strip().endswith("OK"))
 
+    def test_attach_file_appends_to_prompt(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+            store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
+            attach_path = Path(td) / "a.txt"
+            attach_path.write_text("ATTACH\n", encoding="utf-8")
+
+            def fake_chat(provider, model_id, messages, **_kwargs):
+                content = messages[-1]["content"]
+                self.assertIn("Q", content)
+                self.assertIn("BEGIN ATTACHMENT: a.txt", content)
+                self.assertIn("ATTACH", content)
+                self.assertIn("END ATTACHMENT: a.txt", content)
+                return ChatResult(content="OK")
+
+            out = io.StringIO()
+            with patch("mq.cli.chat", side_effect=fake_chat), redirect_stdout(out):
+                rc = cli.main(["ask", "m", "-n", "--attach", str(attach_path), "Q"])
+            self.assertEqual(rc, 0)
+
+    def test_attach_dash_reads_from_stdin(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+            store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
+
+            def fake_chat(provider, model_id, messages, **_kwargs):
+                content = messages[-1]["content"]
+                self.assertIn("Q", content)
+                self.assertIn("BEGIN ATTACHMENT: stdin", content)
+                self.assertIn("ATTACH", content)
+                return ChatResult(content="OK")
+
+            out = io.StringIO()
+            stdin = io.StringIO("ATTACH\n")
+            with patch("mq.cli.chat", side_effect=fake_chat), patch("sys.stdin", stdin), redirect_stdout(out):
+                rc = cli.main(["ask", "m", "-n", "--attach", "-", "Q"])
+            self.assertEqual(rc, 0)
+
     def test_session_rename_updates_latest_pointer(self):
         with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)

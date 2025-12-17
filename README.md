@@ -91,6 +91,8 @@ One-off ask without creating a session:
 ```bash
 mq ask -n gpt "quick question"
 echo "prompt from stdin" | mq ask -n gpt -
+mq ask -n gpt --attach README.md "Summarize this repo"
+cat README.md | mq ask -n gpt --attach - "Summarize the attached file"
 ```
 
 Override request controls:

@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Iterable
 
 from llm_client import get_provider
 
@@ -90,6 +91,7 @@ Request controls:
 
 stdin:
   - For ask/continue/test, pass "-" as the query to read the full prompt from stdin.
+  - Use --attach PATH to append file contents into the prompt (PATH may be "-").
 """
 
 
@@ -179,6 +181,39 @@ def _resolve_query(query: str) -> str:
     return query
 
 
+def _read_attach(path: str) -> tuple[str, str]:
+    if path == "-":
+        return "stdin", sys.stdin.read()
+    p = Path(path).expanduser()
+    try:
+        content = p.read_text(encoding="utf-8")
+    except OSError as e:
+        raise UserError(f"Failed to read attachment {path!r}: {e}") from e
+    return p.name, content
+
+
+def _format_attachment(name: str, content: str) -> str:
+    name = name or "attachment"
+    return f"--- BEGIN ATTACHMENT: {name} ---\n{content.rstrip()}\n--- END ATTACHMENT: {name} ---"
+
+
+def _apply_attachments_to_prompt(prompt: str, attach_paths: Iterable[str] | None) -> str:
+    paths = [p for p in (attach_paths or []) if p is not None]
+    if not paths:
+        return prompt
+    stdin_count = sum(1 for p in paths if p == "-")
+    if stdin_count > 1:
+        raise UserError("Only one --attach '-' is allowed")
+    if prompt == "-" and stdin_count:
+        raise UserError("Cannot use '-' for both query and --attach (stdin can only be consumed once)")
+
+    blocks: list[str] = []
+    for path in paths:
+        name, content = _read_attach(path)
+        blocks.append(_format_attachment(name, content))
+    return (prompt.rstrip() + "\n\n" + "\n\n".join(blocks)).rstrip()
+
+
 def _positive_int(text: str) -> int:
     value = int(text)
     if value <= 0:
@@ -215,6 +250,7 @@ def _build_parser() -> argparse.ArgumentParser:
     ask.add_argument("--json", action="store_true", help="Emit a single-line JSON object")
     ask.add_argument("-n", "--no-session", action="store_true", help="Do not create or update a session")
     ask.add_argument("--session", help="Create a new named session id (collision = error)")
+    ask.add_argument("--attach", action="append", help="Append file content to the prompt ('-' for stdin)", default=[])
     ask.add_argument("-t", "--timeout-seconds", type=_positive_int, help="Request timeout in seconds (default: 600)")
     ask.add_argument("-r", "--retries", type=_non_negative_int, help="Max retries for retryable errors (default: 3)")
     ask.add_argument("query")
@@ -222,6 +258,7 @@ def _build_parser() -> argparse.ArgumentParser:
     cont = sub.add_parser("continue", aliases=["cont"], help="Continue the most recent conversation")
     cont.add_argument("--session", help="Continue a specific session id (default: latest)")
     cont.add_argument("--json", action="store_true", help="Emit a single-line JSON object")
+    cont.add_argument("--attach", action="append", help="Append file content to the prompt ('-' for stdin)", default=[])
     cont.add_argument("-t", "--timeout-seconds", type=_positive_int, help="Request timeout in seconds (default: 600)")
     cont.add_argument("-r", "--retries", type=_non_negative_int, help="Max retries for retryable errors (default: 3)")
     cont.add_argument("query")
@@ -240,6 +277,7 @@ def _build_parser() -> argparse.ArgumentParser:
     test.add_argument("--sysprompt-file", help="Read saved system prompt from file ('-' for stdin)")
     test.add_argument("--json", action="store_true", help="Emit a single-line JSON object")
     test.add_argument("--save", action="store_true", help="Save/overwrite this shortname on success")
+    test.add_argument("--attach", action="append", help="Append file content to the prompt ('-' for stdin)", default=[])
     test.add_argument("-t", "--timeout-seconds", type=_positive_int, help="Request timeout in seconds (default: 600)")
     test.add_argument("-r", "--retries", type=_non_negative_int, help="Max retries for retryable errors (default: 3)")
     test.add_argument("query")
@@ -291,7 +329,8 @@ def _cmd_ask(args: argparse.Namespace) -> int:
     messages: list[dict] = []
     if sysprompt:
         messages.append({"role": "system", "content": sysprompt})
-    query = _resolve_query(args.query)
+    raw_query = _resolve_query(args.query)
+    query = _apply_attachments_to_prompt(raw_query, args.attach)
     messages.append({"role": "user", "content": query})
 
     result = chat(provider, model, messages, timeout_seconds=args.timeout_seconds, max_retries=args.retries)
@@ -343,7 +382,8 @@ def _cmd_continue(args: argparse.Namespace) -> int:
         _print_err("warning: --json output does not include full conversation context (use `mq dump` for history)")
 
     messages = list(messages)
-    query = _resolve_query(args.query)
+    raw_query = _resolve_query(args.query)
+    query = _apply_attachments_to_prompt(raw_query, args.attach)
     messages.append({"role": "user", "content": query})
 
     result = chat(provider, model, messages, timeout_seconds=args.timeout_seconds, max_retries=args.retries)
@@ -386,7 +426,8 @@ def _cmd_test(args: argparse.Namespace) -> int:
     sysprompt = _resolve_sysprompt(sysprompt=args.sysprompt, sysprompt_file=args.sysprompt_file)
     if sysprompt:
         messages.append({"role": "system", "content": sysprompt})
-    query = _resolve_query(args.query)
+    raw_query = _resolve_query(args.query)
+    query = _apply_attachments_to_prompt(raw_query, args.attach)
     messages.append({"role": "user", "content": query})
 
     result = chat(args.provider, args.model, messages, timeout_seconds=args.timeout_seconds, max_retries=args.retries)
