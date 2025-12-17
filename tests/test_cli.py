@@ -464,6 +464,21 @@ class MQLLMControlsTests(unittest.TestCase):
         self.assertEqual(calls["timeout"], 12)
         self.assertEqual(calls["max_retries"], 0)
 
+    def test_cli_short_flags_pass_timeout_and_retries(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+            store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
+
+            def fake_chat(provider, model_id, messages, **kwargs):
+                self.assertEqual(kwargs.get("timeout_seconds"), 12)
+                self.assertEqual(kwargs.get("max_retries"), 0)
+                return ChatResult(content="OK")
+
+            out = io.StringIO()
+            with patch("mq.cli.chat", side_effect=fake_chat), redirect_stdout(out):
+                rc = cli.main(["ask", "m", "-n", "-t", "12", "-r", "0", "hi"])
+            self.assertEqual(rc, 0)
+            self.assertTrue(out.getvalue().strip().endswith("OK"))
+
     def test_session_rename_updates_latest_pointer(self):
         with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)

@@ -85,8 +85,8 @@ Provider API keys (environment variables, via llm_client):
   - chutes: CHUTES_API_TOKEN
 
 Request controls:
-  - --timeout-seconds N  (default: 600)
-  - --retries N          (default: 3)
+  - -t/--timeout-seconds N  (default: 600)
+  - -r/--retries N          (default: 3)
 """
 
 
@@ -206,15 +206,15 @@ def _build_parser() -> argparse.ArgumentParser:
     ask.add_argument("--json", action="store_true", help="Emit a single-line JSON object")
     ask.add_argument("-n", "--no-session", action="store_true", help="Do not create or update a session")
     ask.add_argument("--session", help="Create a new named session id (collision = error)")
-    ask.add_argument("--timeout-seconds", type=_positive_int, help="Request timeout in seconds (default: 600)")
-    ask.add_argument("--retries", type=_non_negative_int, help="Max retries for retryable errors (default: 3)")
+    ask.add_argument("-t", "--timeout-seconds", type=_positive_int, help="Request timeout in seconds (default: 600)")
+    ask.add_argument("-r", "--retries", type=_non_negative_int, help="Max retries for retryable errors (default: 3)")
     ask.add_argument("query")
 
     cont = sub.add_parser("continue", aliases=["cont"], help="Continue the most recent conversation")
     cont.add_argument("--session", help="Continue a specific session id (default: latest)")
     cont.add_argument("--json", action="store_true", help="Emit a single-line JSON object")
-    cont.add_argument("--timeout-seconds", type=_positive_int, help="Request timeout in seconds (default: 600)")
-    cont.add_argument("--retries", type=_non_negative_int, help="Max retries for retryable errors (default: 3)")
+    cont.add_argument("-t", "--timeout-seconds", type=_positive_int, help="Request timeout in seconds (default: 600)")
+    cont.add_argument("-r", "--retries", type=_non_negative_int, help="Max retries for retryable errors (default: 3)")
     cont.add_argument("query")
 
     dump = sub.add_parser("dump", help="Dump the latest session context as JSON")
@@ -231,8 +231,8 @@ def _build_parser() -> argparse.ArgumentParser:
     test.add_argument("--sysprompt-file", help="Read saved system prompt from file ('-' for stdin)")
     test.add_argument("--json", action="store_true", help="Emit a single-line JSON object")
     test.add_argument("--save", action="store_true", help="Save/overwrite this shortname on success")
-    test.add_argument("--timeout-seconds", type=_positive_int, help="Request timeout in seconds (default: 600)")
-    test.add_argument("--retries", type=_non_negative_int, help="Max retries for retryable errors (default: 3)")
+    test.add_argument("-t", "--timeout-seconds", type=_positive_int, help="Request timeout in seconds (default: 600)")
+    test.add_argument("-r", "--retries", type=_non_negative_int, help="Max retries for retryable errors (default: 3)")
     test.add_argument("query")
 
     session = sub.add_parser("session", help="Manage sessions")

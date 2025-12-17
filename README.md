@@ -95,7 +95,7 @@ mq ask -n gpt "quick question"
 Override request controls:
 
 ```bash
-mq ask gpt --timeout-seconds 600 --retries 3 "slow question"
+mq ask gpt -t 600 -r 3 "slow question"
 ```
 
 If a provider returns a separate reasoning trace, `mq` prints it before the response, with a `response:` header separating them.
