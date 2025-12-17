@@ -98,7 +98,8 @@ class MQCLITests(unittest.TestCase):
                 with redirect_stdout(out):
                     rc = cli.main(["ask", "m", "Q1"])
                 self.assertEqual(rc, 0)
-                self.assertEqual(out.getvalue().strip(), "A1")
+                self.assertTrue(out.getvalue().startswith("session: "))
+                self.assertTrue(out.getvalue().strip().endswith("A1"))
 
             sessions = store.list_sessions()
             self.assertEqual(len(sessions), 1)
@@ -112,7 +113,8 @@ class MQCLITests(unittest.TestCase):
                 with redirect_stdout(out):
                     rc = cli.main(["ask", "m", "Q2"])
                 self.assertEqual(rc, 0)
-                self.assertEqual(out.getvalue().strip(), "A2")
+                self.assertTrue(out.getvalue().startswith("session: "))
+                self.assertTrue(out.getvalue().strip().endswith("A2"))
 
             sessions2 = store.list_sessions()
             self.assertEqual(len(sessions2), 2)
@@ -139,7 +141,8 @@ class MQCLITests(unittest.TestCase):
                 with redirect_stdout(out):
                     rc = cli.main(["cont", "Q2"])
                 self.assertEqual(rc, 0)
-                self.assertEqual(out.getvalue().strip(), "A2")
+                self.assertTrue(out.getvalue().startswith("session: "))
+                self.assertTrue(out.getvalue().strip().endswith("A2"))
 
             latest = store.load_latest_session()
             self.assertEqual([m["content"] for m in latest["messages"]], ["Q1", "A1", "Q2", "A2"])
@@ -181,7 +184,7 @@ class MQCLITests(unittest.TestCase):
             with patch("mq.cli.chat", return_value=ChatResult(content="A1")):
                 out = io.StringIO()
                 with redirect_stdout(out):
-                    cli.main(["ask", "m", "Q1"])
+                    cli.main(["ask", "m", "--session", "s1", "Q1"])
 
             out = io.StringIO()
             with redirect_stdout(out):
@@ -256,9 +259,10 @@ class MQCLITests(unittest.TestCase):
                 redirect_stdout(out),
                 redirect_stderr(err),
             ):
-                rc = cli.main(["ask", "m", "Q1"])
+                rc = cli.main(["ask", "m", "--session", "s1", "Q1"])
             self.assertEqual(rc, 0)
             text = out.getvalue()
+            self.assertIn("session: s1", text)
             self.assertIn("reasoning:", text)
             self.assertIn("trace", text)
             self.assertIn("\n\nresponse:\n", text)
@@ -270,30 +274,30 @@ class MQCLITests(unittest.TestCase):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
             out = io.StringIO()
             with patch("mq.cli.chat", return_value=ChatResult(content="A1")), redirect_stdout(out):
-                rc = cli.main(["ask", "m", "--json", "Q1"])
+                rc = cli.main(["ask", "m", "--json", "--session", "s1", "Q1"])
             self.assertEqual(rc, 0)
             payload = json.loads(out.getvalue().strip())
-            self.assertEqual(payload, {"response": "A1", "prompt": "Q1"})
+            self.assertEqual(payload, {"response": "A1", "prompt": "Q1", "session": "s1"})
 
     def test_json_output_with_reasoning(self):
         with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
             out = io.StringIO()
             with patch("mq.cli.chat", return_value=ChatResult(content="A1", reasoning="trace")), redirect_stdout(out):
-                rc = cli.main(["ask", "m", "--json", "Q1"])
+                rc = cli.main(["ask", "m", "--json", "--session", "s1", "Q1"])
             self.assertEqual(rc, 0)
             payload = json.loads(out.getvalue().strip())
-            self.assertEqual(payload, {"response": "A1", "prompt": "Q1", "reasoning": "trace"})
+            self.assertEqual(payload, {"response": "A1", "prompt": "Q1", "session": "s1", "reasoning": "trace"})
 
     def test_json_output_includes_sysprompt_when_set(self):
         with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
             out = io.StringIO()
             with patch("mq.cli.chat", return_value=ChatResult(content="A1")), redirect_stdout(out):
-                rc = cli.main(["ask", "m", "--json", "-s", "S", "Q1"])
+                rc = cli.main(["ask", "m", "--json", "--session", "s1", "-s", "S", "Q1"])
             self.assertEqual(rc, 0)
             payload = json.loads(out.getvalue().strip())
-            self.assertEqual(payload, {"response": "A1", "prompt": "Q1", "sysprompt": "S"})
+            self.assertEqual(payload, {"response": "A1", "prompt": "Q1", "session": "s1", "sysprompt": "S"})
 
     def test_continue_json_warns_context_not_included(self):
         with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
@@ -301,7 +305,7 @@ class MQCLITests(unittest.TestCase):
             with patch("mq.cli.chat", return_value=ChatResult(content="A1")):
                 out0 = io.StringIO()
                 with redirect_stdout(out0):
-                    cli.main(["ask", "m", "Q1"])
+                    cli.main(["ask", "m", "--session", "s1", "Q1"])
 
             out = io.StringIO()
             err = io.StringIO()
@@ -314,7 +318,7 @@ class MQCLITests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertIn("does not include full conversation context", err.getvalue())
             payload = json.loads(out.getvalue().strip())
-            self.assertEqual(payload, {"response": "A2", "prompt": "Q2"})
+            self.assertEqual(payload, {"response": "A2", "prompt": "Q2", "session": "s1"})
 
     def test_session_list_and_select_and_continue_session(self):
         with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
@@ -322,7 +326,7 @@ class MQCLITests(unittest.TestCase):
             with patch("mq.cli.chat", return_value=ChatResult(content="A1")):
                 out1 = io.StringIO()
                 with redirect_stdout(out1):
-                    cli.main(["ask", "m", "Q1"])
+                    cli.main(["ask", "m", "--session", "s1", "Q1"])
             sid1 = store.load_latest_session()["id"]
             last_path = store.last_conversation_path()
             self.assertTrue(last_path.exists() or last_path.is_symlink())
@@ -330,7 +334,7 @@ class MQCLITests(unittest.TestCase):
             with patch("mq.cli.chat", return_value=ChatResult(content="A2")):
                 out2 = io.StringIO()
                 with redirect_stdout(out2):
-                    cli.main(["ask", "m", "Q2"])
+                    cli.main(["ask", "m", "--session", "s2", "Q2"])
             sid2 = store.load_latest_session()["id"]
             self.assertNotEqual(sid1, sid2)
             # last_conversation.json points at latest session (either symlink or pointer).
@@ -366,7 +370,7 @@ class MQCLITests(unittest.TestCase):
             with patch("mq.cli.chat", return_value=ChatResult(content="A1")):
                 out1 = io.StringIO()
                 with redirect_stdout(out1):
-                    cli.main(["ask", "m", "Q1"])
+                    cli.main(["ask", "m", "--session", "s1", "Q1"])
             sid1 = store.load_latest_session()["id"]
             session_count = len(store.list_sessions())
 
@@ -375,7 +379,8 @@ class MQCLITests(unittest.TestCase):
                 with redirect_stdout(out2):
                     rc = cli.main(["ask", "m", "-n", "Q2"])
             self.assertEqual(rc, 0)
-            self.assertEqual(out2.getvalue().strip(), "A2")
+            self.assertTrue(out2.getvalue().startswith("session: (none)\n"))
+            self.assertTrue(out2.getvalue().strip().endswith("A2"))
             self.assertEqual(len(store.list_sessions()), session_count)
             self.assertEqual(store.load_latest_session()["id"], sid1)
             self.assertEqual(store.load_last_conversation().get("id"), sid1)
@@ -397,6 +402,20 @@ class MQCLITests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("usage:", out.getvalue())
 
+    def test_session_rename_updates_latest_pointer(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+            store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
+            with patch("mq.cli.chat", return_value=ChatResult(content="A1")):
+                out1 = io.StringIO()
+                with redirect_stdout(out1):
+                    cli.main(["ask", "m", "--session", "old", "Q1"])
+
+            self.assertEqual(store.load_latest_session()["id"], "old")
+            rc = cli.main(["session", "rename", "old", "new"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(store.load_latest_session()["id"], "new")
+            self.assertTrue(store.session_path("new").exists())
+
     def test_session_list_long_prompt_shows_head_and_tail(self):
         with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
@@ -404,7 +423,7 @@ class MQCLITests(unittest.TestCase):
             with patch("mq.cli.chat", return_value=ChatResult(content="A1")):
                 out1 = io.StringIO()
                 with redirect_stdout(out1):
-                    cli.main(["ask", "m", long_q])
+                    cli.main(["ask", "m", "--session", "s1", long_q])
             out = io.StringIO()
             with redirect_stdout(out):
                 rc = cli.main(["session", "list"])

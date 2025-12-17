@@ -68,6 +68,7 @@ For convenience, `~/.mq/last_conversation.json` is maintained as a symlink/point
 ```bash
 mq session list
 mq session select <id>
+mq session rename <old> <new>
 mq continue --session <id> "follow up"
 ```
 

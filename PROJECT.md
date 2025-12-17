@@ -100,6 +100,7 @@ Behavior:
 Options:
 
 - `-n/--no-session`: do not create a session or update `~/.mq/last_conversation.json` (one-off query).
+- `--session <id>`: create a named session id (collision = error).
 
 ### `mq continue` / `mq cont`
 
@@ -135,6 +136,7 @@ Manage sessions:
 ```
 mq session list
 mq session select <id>
+mq session rename <old> <new>
 ```
 
 ### `mq rm`

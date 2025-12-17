@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 import time
 import uuid
@@ -12,6 +13,7 @@ from .errors import ConfigError, UserError
 
 CONFIG_VERSION = 1
 SESSION_VERSION = 1
+SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
 
 def mq_home() -> Path:
@@ -52,6 +54,20 @@ def _session_filename(session_id: str) -> str:
 def session_path(session_id: str) -> Path:
     return sessions_dir() / _session_filename(session_id)
 
+def validate_session_id(session_id: str) -> None:
+    if not isinstance(session_id, str) or not session_id:
+        raise UserError("Session id must be non-empty")
+    if not SESSION_ID_RE.fullmatch(session_id):
+        raise UserError("Invalid session id (use only letters, digits, '_' and '-', no spaces)")
+
+
+def session_exists(session_id: str) -> bool:
+    try:
+        validate_session_id(session_id)
+    except UserError:
+        return False
+    return session_path(session_id).exists()
+
 
 def _set_latest_session(session_id: str) -> None:
     target_name = _session_filename(session_id)
@@ -88,8 +104,20 @@ def _read_latest_session_id_from_last_conversation() -> str | None:
     return None
 
 
-def create_session(*, model_shortname: str, provider: str, model: str, sysprompt: str | None, messages: list[dict]) -> str:
-    session_id = uuid.uuid4().hex
+def create_session(
+    *,
+    model_shortname: str,
+    provider: str,
+    model: str,
+    sysprompt: str | None,
+    messages: list[dict],
+    session_id: str | None = None,
+) -> str:
+    if session_id is None:
+        session_id = uuid.uuid4().hex
+    validate_session_id(session_id)
+    if session_path(session_id).exists():
+        raise UserError(f"Session already exists: {session_id!r}")
     created_at = _now_iso()
     data = {
         "version": SESSION_VERSION,
@@ -122,6 +150,7 @@ def save_session(session: dict[str, Any]) -> None:
     session_id = session.get("id")
     if not isinstance(session_id, str) or not session_id:
         raise ConfigError("Invalid session (missing id)")
+    validate_session_id(session_id)
     session["updated_at"] = _now_iso()
     _write_json_atomic(session_path(session_id), session)
     _set_latest_session(session_id)
@@ -186,6 +215,31 @@ def select_session(session_id: str) -> None:
     _ = load_session(session_id)
     _set_latest_session(session_id)
 
+
+def rename_session(old_id: str, new_id: str) -> None:
+    validate_session_id(old_id)
+    validate_session_id(new_id)
+    if old_id == new_id:
+        return
+    old_path = session_path(old_id)
+    if not old_path.exists():
+        raise UserError(f"Unknown session id: {old_id!r}")
+    new_path = session_path(new_id)
+    if new_path.exists():
+        raise UserError(f"Session already exists: {new_id!r}")
+
+    session = load_session(old_id)
+    session["id"] = new_id
+    session["updated_at"] = _now_iso()
+    _write_json_atomic(new_path, session)
+    try:
+        old_path.unlink()
+    except OSError:
+        pass
+
+    current = _read_latest_session_id_from_last_conversation()
+    if current == old_id:
+        _set_latest_session(new_id)
 
 def _read_json(path: Path) -> Any:
     try:

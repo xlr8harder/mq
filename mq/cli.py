@@ -18,6 +18,7 @@ from .store import (
     load_latest_session,
     load_session,
     remove_model,
+    rename_session,
     save_session,
     select_session,
     upsert_model,
@@ -29,12 +30,13 @@ mq — Model Query CLI
 Common usage:
   mq add <shortname> --provider <provider> <model> [--sysprompt ... | --sysprompt-file PATH]
   mq models
-  mq ask <shortname> [-s/--sysprompt ...] [--json] [-n/--no-session] "<query>"
+  mq ask <shortname> [-s/--sysprompt ...] [--json] [-n/--no-session] [--session <id>] "<query>"
   mq continue [--session <id>] [--json] "<query>"
   mq cont [--session <id>] [--json] "<query>"
   mq dump [--session <id>]
   mq session list
   mq session select <id>
+  mq session rename <old> <new>
 
 Notes:
   - Each `mq ask` creates a new session under ~/.mq/sessions/ unless -n/--no-session is used.
@@ -42,11 +44,13 @@ Notes:
   - If a provider returns a reasoning trace, mq prints it before the response with a `response:` header.
   - --json prints a single-line JSON object including at least `response` and `prompt`.
   - `mq test` validates a provider/model; it only saves the alias when --save is provided.
+  - Session ids are filesystem-safe (letters/digits/_/-) with no spaces.
 
 Examples:
   mq add gpt --provider openai gpt-4o-mini
   mq ask gpt "Write a haiku about recursive functions"
   mq ask -n gpt "quick question"
+  mq ask gpt --session work "start a tracked session"
   mq continue "Make it funnier"
   mq test gpt --provider openai gpt-4o-mini "hello"
   mq test gpt --provider openai gpt-4o-mini --save "hello"
@@ -96,17 +100,23 @@ def _emit_result(
     json_mode: bool,
     prompt: str | None = None,
     sysprompt: str | None = None,
+    session_id: str | None = None,
 ) -> None:
     if json_mode:
         payload: dict[str, str] = {"response": response}
         if prompt is not None:
             payload["prompt"] = prompt
+        if session_id is not None:
+            payload["session"] = session_id
         if sysprompt and sysprompt.strip():
             payload["sysprompt"] = sysprompt
         if reasoning and reasoning.strip():
             payload["reasoning"] = reasoning
         print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
         return
+
+    if session_id is not None:
+        print(f"session: {session_id}")
 
     if reasoning and reasoning.strip():
         print("reasoning:")
@@ -154,6 +164,7 @@ def _build_parser() -> argparse.ArgumentParser:
     ask.add_argument("--sysprompt", "-s", help="Override system prompt for this run")
     ask.add_argument("--json", action="store_true", help="Emit a single-line JSON object")
     ask.add_argument("-n", "--no-session", action="store_true", help="Do not create or update a session")
+    ask.add_argument("--session", help="Create a new named session id (collision = error)")
     ask.add_argument("query")
 
     cont = sub.add_parser("continue", aliases=["cont"], help="Continue the most recent conversation")
@@ -182,6 +193,9 @@ def _build_parser() -> argparse.ArgumentParser:
     session_sub.add_parser("list", help="List sessions")
     session_select = session_sub.add_parser("select", help="Select a session as latest")
     session_select.add_argument("session_id")
+    session_rename = session_sub.add_parser("rename", help="Rename a session id (updates latest pointer if needed)")
+    session_rename.add_argument("old_id")
+    session_rename.add_argument("new_id")
 
     return parser
 
@@ -224,24 +238,36 @@ def _cmd_ask(args: argparse.Namespace) -> int:
     messages.append({"role": "user", "content": args.query})
 
     result = chat(provider, model, messages)
+
+    if args.no_session:
+        if args.session:
+            raise MQError("Cannot use --session with -n/--no-session")
+        _emit_result(
+            response=result.content,
+            reasoning=result.reasoning,
+            json_mode=args.json,
+            prompt=args.query,
+            sysprompt=sysprompt,
+            session_id="(none)" if not args.json else None,
+        )
+        return 0
+
+    messages.append({"role": "assistant", "content": result.content})
+    session_id = create_session(
+        model_shortname=args.shortname,
+        provider=provider,
+        model=model,
+        sysprompt=sysprompt,
+        messages=messages,
+        session_id=args.session,
+    )
     _emit_result(
         response=result.content,
         reasoning=result.reasoning,
         json_mode=args.json,
         prompt=args.query,
         sysprompt=sysprompt,
-    )
-
-    if args.no_session:
-        return 0
-
-    messages.append({"role": "assistant", "content": result.content})
-    create_session(
-        model_shortname=args.shortname,
-        provider=provider,
-        model=model,
-        sysprompt=sysprompt,
-        messages=messages,
+        session_id=session_id,
     )
     return 0
 
@@ -263,17 +289,17 @@ def _cmd_continue(args: argparse.Namespace) -> int:
     messages.append({"role": "user", "content": args.query})
 
     result = chat(provider, model, messages)
+    messages.append({"role": "assistant", "content": result.content})
+    session["messages"] = messages
+    save_session(session)
     _emit_result(
         response=result.content,
         reasoning=result.reasoning,
         json_mode=args.json,
         prompt=args.query,
         sysprompt=session.get("sysprompt") if isinstance(session, dict) else None,
+        session_id=session.get("id") if isinstance(session.get("id"), str) else None,
     )
-
-    messages.append({"role": "assistant", "content": result.content})
-    session["messages"] = messages
-    save_session(session)
     return 0
 
 
@@ -368,6 +394,12 @@ def _cmd_session_select(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_session_rename(args: argparse.Namespace) -> int:
+    ensure_home()
+    rename_session(args.old_id, args.new_id)
+    return 0
+
+
 def _cmd_help(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     topic = (getattr(args, "topic", None) or "").strip()
     if not topic:
@@ -408,6 +440,8 @@ def main(argv: list[str] | None = None) -> int:
                         return _cmd_session_list(args)
                     case "select":
                         return _cmd_session_select(args)
+                    case "rename":
+                        return _cmd_session_rename(args)
                     case _:
                         _print_err(f"Unknown session command: {args.session_command}")
                         return 2
