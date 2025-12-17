@@ -92,6 +92,12 @@ One-off ask without creating a session:
 mq ask -n gpt "quick question"
 ```
 
+Override request controls:
+
+```bash
+mq ask gpt --timeout-seconds 600 --retries 3 "slow question"
+```
+
 If a provider returns a separate reasoning trace, `mq` prints it before the response, with a `response:` header separating them.
 Use `--json` to get a single-line JSON object on stdout including the query prompt: `{"response":"...","prompt":"...","reasoning":"..."}` (omit `reasoning`/`sysprompt` if absent).
 

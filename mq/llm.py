@@ -10,6 +10,7 @@ from .errors import LLMError
 
 
 DEFAULT_TIMEOUT_SECONDS = 600
+DEFAULT_MAX_RETRIES = 3
 
 
 @dataclass(frozen=True)
@@ -99,9 +100,18 @@ def _coerce_content(raw_content) -> str | None:
     return None
 
 
-def chat(provider_name: str, model_id: str, messages: list[dict]) -> ChatResult:
+def chat(
+    provider_name: str,
+    model_id: str,
+    messages: list[dict],
+    *,
+    timeout_seconds: int | None = None,
+    max_retries: int | None = None,
+) -> ChatResult:
     provider = get_provider(provider_name)
-    response = retry_request(provider, messages=messages, model_id=model_id, timeout=DEFAULT_TIMEOUT_SECONDS)
+    timeout = DEFAULT_TIMEOUT_SECONDS if timeout_seconds is None else timeout_seconds
+    retries = DEFAULT_MAX_RETRIES if max_retries is None else max_retries
+    response = retry_request(provider, messages=messages, model_id=model_id, timeout=timeout, max_retries=retries)
     if not response.success:
         base_error_info = response.error_info or {}
         status_code = base_error_info.get("status_code")

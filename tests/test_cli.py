@@ -12,6 +12,7 @@ from mq import store
 from mq.errors import LLMError
 from mq.errors import UserError
 from mq.llm import ChatResult
+from mq import llm as mq_llm
 
 
 class MQCLITests(unittest.TestCase):
@@ -131,7 +132,7 @@ class MQCLITests(unittest.TestCase):
                     rc = cli.main(["ask", "m", "Q1"])
                 self.assertEqual(rc, 0)
 
-            def fake_chat(provider, model_id, messages):
+            def fake_chat(provider, model_id, messages, **_kwargs):
                 self.assertEqual(messages[-1]["role"], "user")
                 self.assertEqual(messages[-1]["content"], "Q2")
                 return ChatResult(content="A2")
@@ -163,7 +164,7 @@ class MQCLITests(unittest.TestCase):
             self.assertEqual(session["messages"][0]["role"], "system")
             self.assertEqual(session["messages"][0]["content"], "OVERRIDE")
 
-            def fake_chat(provider, model_id, messages):
+            def fake_chat(provider, model_id, messages, **_kwargs):
                 self.assertEqual(messages[0]["role"], "system")
                 self.assertEqual(messages[0]["content"], "OVERRIDE")
                 return ChatResult(content="A2")
@@ -408,6 +409,60 @@ class MQCLITests(unittest.TestCase):
             rc = cli.main(["help", "session", "list"])
         self.assertEqual(rc, 0)
         self.assertIn("usage:", out.getvalue())
+
+
+class MQLLMControlsTests(unittest.TestCase):
+    def test_llm_chat_defaults_timeout_and_retries(self):
+        calls = {}
+
+        def fake_get_provider(_name):
+            return object()
+
+        class FakeResp:
+            success = True
+            standardized_response = {"content": "ok"}
+            raw_provider_response = {}
+            error_info = None
+
+        def fake_retry_request(provider, messages, model_id, **options):
+            calls["timeout"] = options.get("timeout")
+            calls["max_retries"] = options.get("max_retries")
+            return FakeResp()
+
+        with patch("mq.llm.get_provider", side_effect=fake_get_provider), patch("mq.llm.retry_request", side_effect=fake_retry_request):
+            res = mq_llm.chat("openai", "gpt-4o-mini", [{"role": "user", "content": "hi"}])
+        self.assertEqual(res.content, "ok")
+        self.assertEqual(calls["timeout"], mq_llm.DEFAULT_TIMEOUT_SECONDS)
+        self.assertEqual(calls["max_retries"], mq_llm.DEFAULT_MAX_RETRIES)
+
+    def test_llm_chat_overrides_timeout_and_retries(self):
+        calls = {}
+
+        def fake_get_provider(_name):
+            return object()
+
+        class FakeResp:
+            success = True
+            standardized_response = {"content": "ok"}
+            raw_provider_response = {}
+            error_info = None
+
+        def fake_retry_request(provider, messages, model_id, **options):
+            calls["timeout"] = options.get("timeout")
+            calls["max_retries"] = options.get("max_retries")
+            return FakeResp()
+
+        with patch("mq.llm.get_provider", side_effect=fake_get_provider), patch("mq.llm.retry_request", side_effect=fake_retry_request):
+            res = mq_llm.chat(
+                "openai",
+                "gpt-4o-mini",
+                [{"role": "user", "content": "hi"}],
+                timeout_seconds=12,
+                max_retries=0,
+            )
+        self.assertEqual(res.content, "ok")
+        self.assertEqual(calls["timeout"], 12)
+        self.assertEqual(calls["max_retries"], 0)
 
     def test_session_rename_updates_latest_pointer(self):
         with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
