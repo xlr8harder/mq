@@ -3,6 +3,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import re
+import os
+import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Iterable
 
@@ -32,6 +36,7 @@ Quickstart:
   mq add gpt --provider openai gpt-4o-mini
   mq query gpt "Write a haiku about recursive functions"
   mq continue "Make it funnier"
+  mq batch gpt -i in.jsonl -o out.jsonl
 
 Configuration:
   - Default home: ~/.mq/ (override with MQ_HOME=/path)
@@ -62,6 +67,16 @@ Commands:
     - By default creates a new session and prints `session: <id>` first.
     - Use -n/--no-session for ephemeral asks (no session file, no pointer update).
     - Use --session <id> to create a named session (collision = error).
+
+  mq batch <shortname> -i <in.jsonl|-> -o <out.jsonl|->
+    - Reads JSONL rows (must include a string `prompt` field), queries the model, and writes JSONL results.
+    - Output rows include all input fields plus: `response`, `mq_input_prompt`, `prompt`, and optional `reasoning`/`sysprompt`.
+    - Does not create sessions or update ~/.mq/last_conversation.json.
+    - Use --workers N for parallelism and --extract-tags to extract <field>value</field> into `tag:field`.
+    - Use --prompt to prefix each request: the input row's prompt is appended as an attachment block.
+    - Output order matches input order.
+    - On row failure, writes `error` (and `error_info` when available); exits non-zero if any row failed.
+    - Merge conflicts are fatal (e.g., an input row already contains `response`/`reasoning`/`error` keys, or `tag:*` when --extract-tags is enabled).
 
   mq continue [--session <id>] [--json] "<query>"
   mq cont [--session <id>] [--json] "<query>"  (alias)
@@ -97,7 +112,10 @@ stdin:
   - For query/continue/test, pass "-" as the query to read the full prompt from stdin.
   - Use --attach PATH to append file contents into the prompt (repeatable; PATH may be "-").
   - stdin can only be consumed once, so you can't combine query "-" with --attach "-".
+  - For batch, you may pass '-' to -i/--infile (stdin) and/or -o/--outfile (stdout).
 """
+
+_TAG_RE = re.compile(r"<([A-Za-z0-9_.:-]+)>(.*?)</\1>", re.DOTALL)
 
 
 def _print_err(message: str) -> None:
@@ -218,6 +236,48 @@ def _apply_attachments_to_prompt(prompt: str, attach_paths: Iterable[str] | None
         blocks.append(_format_attachment(name, content))
     return (prompt.rstrip() + "\n\n" + "\n\n".join(blocks)).rstrip()
 
+def _apply_prompt_prefix(prompt: str, prefix: str | None) -> str:
+    if prefix is None or not str(prefix).strip():
+        return prompt
+    attachment = _format_attachment("input.prompt", prompt)
+    return (str(prefix).rstrip() + "\n\n" + attachment).rstrip()
+
+
+def _extract_tags(text: str) -> dict[str, str | list[str]]:
+    matches = list(_TAG_RE.finditer(text or ""))
+    if not matches:
+        return {}
+    extracted: dict[str, list[str]] = {}
+    for m in matches:
+        name = m.group(1)
+        value = (m.group(2) or "").strip()
+        extracted.setdefault(name, []).append(value)
+    out: dict[str, str | list[str]] = {}
+    for name, values in extracted.items():
+        key = f"tag:{name}"
+        out[key] = values[0] if len(values) == 1 else values
+    return out
+
+
+def _iter_jsonl_objects(fp) -> Iterable[tuple[int, dict]]:
+    for line_no, line in enumerate(fp, 1):
+        raw = line.strip()
+        if not raw:
+            continue
+        try:
+            obj = json.loads(raw)
+        except json.JSONDecodeError as e:
+            raise UserError(f"Invalid JSON on line {line_no}: {e}") from e
+        if not isinstance(obj, dict):
+            raise UserError(f"JSONL line {line_no} must be an object")
+        yield line_no, obj
+
+
+def _open_text(path: str, mode: str):
+    if path == "-":
+        return sys.stdin if "r" in mode else sys.stdout
+    return Path(path).expanduser().open(mode, encoding="utf-8")
+
 
 def _positive_int(text: str) -> int:
     value = int(text)
@@ -286,6 +346,18 @@ def _build_parser() -> argparse.ArgumentParser:
     test.add_argument("-t", "--timeout-seconds", type=_positive_int, help="Request timeout in seconds (default: 600)")
     test.add_argument("-r", "--retries", type=_non_negative_int, help="Max retries for retryable errors (default: 3)")
     test.add_argument("query")
+
+    batch = sub.add_parser("batch", help="Process a JSONL file with prompts and write JSONL responses")
+    batch.add_argument("shortname")
+    batch.add_argument("--infile", "-i", required=True, help="Input JSONL path ('-' for stdin)")
+    batch.add_argument("--outfile", "-o", required=True, help="Output JSONL path ('-' for stdout)")
+    batch.add_argument("--sysprompt", "-s", help="Override system prompt for this run")
+    batch.add_argument("--sysprompt-file", help="Read system prompt from file ('-' for stdin)")
+    batch.add_argument("--prompt", help="Prefix prompt (prepends input row prompt as an attachment)", default=None)
+    batch.add_argument("--workers", type=_positive_int, default=20, help="Worker threads (default: 20)")
+    batch.add_argument("--extract-tags", action="store_true", help="Extract <field>value</field> into `tag:field` keys")
+    batch.add_argument("-t", "--timeout-seconds", type=_positive_int, help="Request timeout in seconds (default: 600)")
+    batch.add_argument("-r", "--retries", type=_non_negative_int, help="Max retries for retryable errors (default: 3)")
 
     session = sub.add_parser("session", help="Manage sessions")
     session_sub = session.add_subparsers(dest="session_command", required=True)
@@ -449,6 +521,162 @@ def _cmd_test(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_batch(args: argparse.Namespace) -> int:
+    ensure_home()
+    model_cfg = get_model(args.shortname)
+    provider = model_cfg["provider"]
+    model = model_cfg["model"]
+    sysprompt = _resolve_sysprompt(sysprompt=args.sysprompt, sysprompt_file=args.sysprompt_file)
+    if sysprompt is None:
+        sysprompt = model_cfg.get("sysprompt")
+
+    any_errors = False
+
+    reserved_output_keys = {"response", "reasoning", "sysprompt", "error", "error_info", "mq_input_prompt"}
+    if args.extract_tags:
+        # Tag extraction writes keys like `tag:field`, so reserve that namespace.
+        reserved_prefixes = ("tag:",)
+    else:
+        reserved_prefixes = ()
+
+    def process_row(line_no: int, row: dict) -> dict:
+        nonlocal any_errors
+
+        prompt_val = row.get("prompt")
+        if not isinstance(prompt_val, str):
+            any_errors = True
+            out = dict(row)
+            out["error"] = "Row is missing required string field: prompt"
+            return out
+
+        # Hard-fail merge conflicts with reserved output keys.
+        for k in reserved_output_keys:
+            if k in row:
+                raise UserError(f"Batch merge conflict on line {line_no}: input contains reserved key {k!r}")
+        for prefix in reserved_prefixes:
+            for k in row.keys():
+                if isinstance(k, str) and k.startswith(prefix):
+                    raise UserError(
+                        f"Batch merge conflict on line {line_no}: input contains reserved key prefix {prefix!r} ({k!r})"
+                    )
+
+        prompt_final = _apply_prompt_prefix(prompt_val, args.prompt)
+        messages: list[dict] = []
+        if sysprompt:
+            messages.append({"role": "system", "content": sysprompt})
+        messages.append({"role": "user", "content": prompt_final})
+
+        out = dict(row)
+        out["mq_input_prompt"] = prompt_val
+        out["prompt"] = prompt_final
+        if sysprompt and sysprompt.strip():
+            out["sysprompt"] = sysprompt
+
+        try:
+            result = chat(provider, model, messages, timeout_seconds=args.timeout_seconds, max_retries=args.retries)
+            out["response"] = result.content
+            if result.reasoning and str(result.reasoning).strip():
+                out["reasoning"] = result.reasoning
+            if args.extract_tags:
+                extracted = _extract_tags(result.content)
+                for k in extracted.keys():
+                    if k in out:
+                        raise UserError(f"Batch merge conflict on line {line_no}: extracted key {k!r} already exists")
+                out.update(extracted)
+        except UserError:
+            raise
+        except MQError as e:
+            any_errors = True
+            if isinstance(e, LLMError):
+                out["error"] = str(e)
+                if e.error_info:
+                    out["error_info"] = e.error_info
+            else:
+                out["error"] = str(e)
+        except Exception as e:  # pragma: no cover
+            any_errors = True
+            out["error"] = f"{type(e).__name__}: {e}"
+        return out
+
+    in_fp = _open_text(args.infile, "r")
+    close_in = args.infile != "-"
+    try:
+        rows: list[tuple[int, dict]] = list(_iter_jsonl_objects(in_fp))
+    finally:
+        if close_in:
+            in_fp.close()
+
+    # Detect merge conflicts immediately (before any requests).
+    for line_no, row in rows:
+        for k in reserved_output_keys:
+            if k in row:
+                raise UserError(f"Batch merge conflict on line {line_no}: input contains reserved key {k!r}")
+        for prefix in reserved_prefixes:
+            for k in row.keys():
+                if isinstance(k, str) and k.startswith(prefix):
+                    raise UserError(
+                        f"Batch merge conflict on line {line_no}: input contains reserved key prefix {prefix!r} ({k!r})"
+                    )
+
+    # For file outputs, write atomically (avoid partial files on fatal errors).
+    temp_out_path: Path | None = None
+    if args.outfile != "-":
+        out_path = Path(args.outfile).expanduser()
+        temp_name = f".{out_path.name}.tmp.{os.getpid()}"
+        fd, tmp_path_str = tempfile.mkstemp(prefix=temp_name, dir=str(out_path.parent))
+        os.close(fd)
+        temp_out_path = Path(tmp_path_str)
+        out_fp = temp_out_path.open("w", encoding="utf-8")
+        close_out = True
+    else:
+        out_fp = sys.stdout
+        close_out = False
+
+    wrote_all = False
+    try:
+        results: dict[int, str] = {}
+        next_idx = 0
+
+        with ThreadPoolExecutor(max_workers=args.workers) as ex:
+            futures = {}
+            for idx, (line_no, row) in enumerate(rows):
+                fut = ex.submit(process_row, line_no, row)
+                futures[fut] = idx
+
+            try:
+                for fut in as_completed(futures):
+                    idx = futures[fut]
+                    row_out = fut.result()
+                    line = json.dumps(row_out, ensure_ascii=False, separators=(",", ":"))
+                    results[idx] = line
+                    while next_idx in results:
+                        out_fp.write(results.pop(next_idx) + "\n")
+                        next_idx += 1
+            except UserError:
+                # Merge conflicts are fatal: cancel pending work and abort.
+                for f in futures.keys():
+                    f.cancel()
+                raise
+        wrote_all = True
+    finally:
+        if close_out:
+            out_fp.close()
+
+        if temp_out_path is not None:
+            if wrote_all:
+                final_out_path = Path(args.outfile).expanduser()
+                if final_out_path.exists():
+                    final_out_path.unlink()
+                temp_out_path.rename(final_out_path)
+            else:
+                try:
+                    temp_out_path.unlink()
+                except OSError:
+                    pass
+
+    return 1 if any_errors else 0
+
+
 def _first_user_prompt(messages) -> str:
     if not isinstance(messages, list):
         return ""
@@ -539,6 +767,8 @@ def main(argv: list[str] | None = None) -> int:
                 return _cmd_rm(args)
             case "test":
                 return _cmd_test(args)
+            case "batch":
+                return _cmd_batch(args)
             case "session":
                 match args.session_command:
                     case "list":

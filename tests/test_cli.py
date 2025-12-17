@@ -443,6 +443,82 @@ class MQCLITests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("usage:", out.getvalue())
 
+    def test_batch_merges_rows_and_extracts_tags_and_does_not_create_sessions(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+            store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
+            in_path = Path(td) / "in.jsonl"
+            out_path = Path(td) / "out.jsonl"
+            in_path.write_text(
+                "\n".join(
+                    [
+                        json.dumps({"id": 1, "prompt": "P1"}),
+                        json.dumps({"id": 2, "prompt": "P2"}),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            seen = set()
+
+            def fake_chat(provider, model_id, messages, **_kwargs):
+                self.assertEqual(provider, "openai")
+                self.assertEqual(model_id, "gpt-4o-mini")
+                user = messages[-1]["content"]
+                self.assertIn("PREFIX", user)
+                self.assertIn("BEGIN ATTACHMENT: input.prompt", user)
+                if "P1" in user:
+                    seen.add(1)
+                    return ChatResult(content="<field>one</field>\nR1")
+                if "P2" in user:
+                    seen.add(2)
+                    return ChatResult(content="R2 <field>two</field>")
+                raise AssertionError(f"unexpected prompt: {user!r}")
+
+            with patch("mq.cli.chat", side_effect=fake_chat):
+                rc = cli.main(
+                    [
+                        "batch",
+                        "m",
+                        "-i",
+                        str(in_path),
+                        "-o",
+                        str(out_path),
+                        "--prompt",
+                        "PREFIX",
+                        "--extract-tags",
+                        "--workers",
+                        "2",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(seen, {1, 2})
+            self.assertEqual(store.list_sessions(), [])
+
+            lines = [l for l in out_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+            self.assertEqual(len(lines), 2)
+            rows = [json.loads(l) for l in lines]
+            by_id = {r["id"]: r for r in rows}
+            self.assertIn("response", by_id[1])
+            self.assertIn("prompt", by_id[1])
+            self.assertEqual(by_id[1]["mq_input_prompt"], "P1")
+            self.assertEqual(by_id[2]["mq_input_prompt"], "P2")
+            self.assertEqual(by_id[1]["tag:field"], "one")
+            self.assertEqual(by_id[2]["tag:field"], "two")
+
+    def test_batch_merge_conflict_is_fatal(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+            store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
+            in_path = Path(td) / "in.jsonl"
+            out_path = Path(td) / "out.jsonl"
+            in_path.write_text(json.dumps({"prompt": "P1", "response": "already"}) + "\n", encoding="utf-8")
+            err = io.StringIO()
+            with redirect_stderr(err):
+                rc = cli.main(["batch", "m", "-i", str(in_path), "-o", str(out_path)])
+            self.assertEqual(rc, 2)
+            self.assertIn("merge conflict", err.getvalue())
+            self.assertFalse(out_path.exists())
+
 
 class MQLLMControlsTests(unittest.TestCase):
     def test_llm_chat_defaults_timeout_and_retries(self):

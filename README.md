@@ -61,6 +61,33 @@ mq query gpt --json "Return 3 bullet points"
 mq continue --json "Now add a short summary"
 ```
 
+Batch JSONL → JSONL processing (no sessions):
+
+Input format: JSONL with a `prompt` field per row.
+
+```bash
+mq batch gpt -i in.jsonl -o out.jsonl --workers 20
+mq batch gpt -i in.jsonl -o out.jsonl --prompt "You are terse." --extract-tags
+```
+
+Behavior:
+
+- Each input row is copied into the output row and merged with:
+  - `response` (required)
+  - `mq_input_prompt` (the original input row prompt)
+  - `prompt` (the exact prompt sent to the model, including any `--prompt` prefix formatting)
+  - `sysprompt` (if set)
+  - `reasoning` (if returned by the provider)
+- Output order matches input order, even though requests run concurrently.
+- No sessions are created/updated.
+- If a row fails, it still produces an output row with `error` (and `error_info` when available), and the overall exit code is non-zero.
+
+Tag extraction:
+
+- With `--extract-tags`, any `<field>value</field>` blocks in the model response are extracted into `tag:field` keys.
+- If the same tag appears multiple times, the extracted value is a JSON list.
+- `--extract-tags` reserves the `tag:` key namespace; if any input row already contains keys starting with `tag:`, `mq batch` fails fast.
+
 Tune request behavior:
 
 - `-t/--timeout-seconds`: per-request timeout (seconds), default `600`
