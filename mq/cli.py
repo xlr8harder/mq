@@ -330,15 +330,30 @@ def _cmd_session_list(_: argparse.Namespace) -> int:
     if not sessions:
         print("(no sessions)")
         return 0
+
+    def _one_line_prompt(text: str) -> str:
+        return (text or "").replace("\n", " ").strip()
+
+    def _format_prompt_preview(prompt: str, max_len: int = 160) -> str:
+        prompt = _one_line_prompt(prompt)
+        if len(prompt) <= max_len:
+            return prompt
+        # Show both head and tail for long prompts.
+        # Example: "Hello ... do you understand?"
+        ellipsis = " ... "
+        head_len = (max_len - len(ellipsis)) // 2
+        tail_len = max_len - len(ellipsis) - head_len
+        head = prompt[:head_len].rstrip()
+        tail = prompt[-tail_len:].lstrip()
+        return f"{head}{ellipsis}{tail}"
+
     for s in sessions:
         sid = s.get("id", "")
         updated = s.get("updated_at") or s.get("created_at") or ""
-        shortname = s.get("model_shortname") or ""
         first = _first_user_prompt(s.get("messages"))
-        first = first.replace("\n", " ")
-        if len(first) > 60:
-            first = first[:60] + "…"
-        print(f"{sid}\t{updated}\t{shortname}\t{first}")
+        preview = _format_prompt_preview(first)
+        print(f"{sid}\t{updated}")
+        print(preview)
     return 0
 
 

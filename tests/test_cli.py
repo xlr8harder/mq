@@ -330,8 +330,12 @@ class MQCLITests(unittest.TestCase):
             with redirect_stdout(out):
                 rc = cli.main(["session", "list"])
             self.assertEqual(rc, 0)
-            self.assertIn(sid1, out.getvalue())
-            self.assertIn(sid2, out.getvalue())
+            text = out.getvalue()
+            self.assertIn(sid1, text)
+            self.assertIn(sid2, text)
+            # Two-line format includes prompt preview on the next line.
+            self.assertIn("Q1", text)
+            self.assertIn("Q2", text)
 
             rc = cli.main(["session", "select", sid1])
             self.assertEqual(rc, 0)
@@ -381,6 +385,23 @@ class MQCLITests(unittest.TestCase):
             rc = cli.main(["help", "ask"])
         self.assertEqual(rc, 0)
         self.assertIn("usage:", out.getvalue())
+
+    def test_session_list_long_prompt_shows_head_and_tail(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+            store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
+            long_q = "Hello, I'd like " + ("x" * 300) + " do you understand?"
+            with patch("mq.cli.chat", return_value=ChatResult(content="A1")):
+                out1 = io.StringIO()
+                with redirect_stdout(out1):
+                    cli.main(["ask", "m", long_q])
+            out = io.StringIO()
+            with redirect_stdout(out):
+                rc = cli.main(["session", "list"])
+            self.assertEqual(rc, 0)
+            text = out.getvalue()
+            self.assertIn("Hello, I'd like", text)
+            self.assertIn("do you understand?", text)
+            self.assertIn(" ... ", text)
 
 
 if __name__ == "__main__":
