@@ -41,12 +41,15 @@ Notes:
   - ~/.mq/last_conversation.json is maintained as a symlink/pointer to the latest session file.
   - If a provider returns a reasoning trace, mq prints it before the response with a `response:` header.
   - --json prints a single-line JSON object including at least `response` and `prompt`.
+  - `mq test` validates a provider/model; it only saves the alias when --save is provided.
 
 Examples:
   mq add gpt --provider openai gpt-4o-mini
   mq ask gpt "Write a haiku about recursive functions"
   mq ask -n gpt "quick question"
   mq continue "Make it funnier"
+  mq test gpt --provider openai gpt-4o-mini "hello"
+  mq test gpt --provider openai gpt-4o-mini --save "hello"
   mq session list
   mq continue --session <id> "follow up"
 
