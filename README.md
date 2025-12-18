@@ -83,6 +83,10 @@ Behavior:
 - No sessions are created/updated.
 - If a row fails, it still produces an output row with `error` (and `error_info` when available), and the overall exit code is non-zero.
 - Request controls: `-t/--timeout-seconds` and `-r/--retries` apply per row; batch defaults are `-t 600` and `-r 5`.
+- Progress: prints periodic progress lines to stderr; disable with `--progress-seconds 0`.
+  - For file inputs (non-stdin), progress includes a best-effort ETA (estimated rows remaining based on completed rate; uses file byte position as a proxy for how much input has been ingested).
+  - `outstanding` is submitted-but-not-finished rows (can exceed `workers` because `mq batch` buffers submissions to keep workers busy).
+  - `input_read` tracks how much of the input file has been consumed; it can reach 100% while requests are still in flight.
 
 Tag extraction:
 

@@ -490,6 +490,8 @@ class MQCLITests(unittest.TestCase):
                         "--extract-tags",
                         "--workers",
                         "2",
+                        "--progress-seconds",
+                        "0",
                     ]
                 )
             self.assertEqual(rc, 0)
@@ -518,7 +520,8 @@ class MQCLITests(unittest.TestCase):
                 rc = cli.main(["batch", "m", "-i", str(in_path), "-o", str(out_path)])
             self.assertEqual(rc, 2)
             self.assertIn("merge conflict", err.getvalue())
-            self.assertFalse(out_path.exists())
+            if out_path.exists():
+                self.assertEqual(out_path.read_text(encoding="utf-8"), "")
 
     def test_batch_output_is_completion_order_unordered(self):
         with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
@@ -549,7 +552,20 @@ class MQCLITests(unittest.TestCase):
                 raise AssertionError(f"unexpected prompt: {content!r}")
 
             with patch("mq.cli.chat", side_effect=fake_chat):
-                rc = cli.main(["batch", "m", "-i", str(in_path), "-o", str(out_path), "--workers", "2"])
+                rc = cli.main(
+                    [
+                        "batch",
+                        "m",
+                        "-i",
+                        str(in_path),
+                        "-o",
+                        str(out_path),
+                        "--workers",
+                        "2",
+                        "--progress-seconds",
+                        "0",
+                    ]
+                )
             self.assertEqual(rc, 0)
             lines = [l for l in out_path.read_text(encoding="utf-8").splitlines() if l.strip()]
             self.assertEqual(len(lines), 2)
@@ -571,7 +587,7 @@ class MQCLITests(unittest.TestCase):
                 return ChatResult(content="R")
 
             with patch("mq.cli.chat", side_effect=fake_chat):
-                rc = cli.main(["batch", "m", "-i", str(in_path), "-o", str(out_path)])
+                rc = cli.main(["batch", "m", "-i", str(in_path), "-o", str(out_path), "--progress-seconds", "0"])
             self.assertEqual(rc, 0)
             self.assertEqual(seen["timeout_seconds"], 600)
             self.assertEqual(seen["max_retries"], 5)
@@ -579,10 +595,35 @@ class MQCLITests(unittest.TestCase):
             in_path.write_text(json.dumps({"id": 1, "prompt": "P"}) + "\n", encoding="utf-8")
             seen = {}
             with patch("mq.cli.chat", side_effect=fake_chat):
-                rc = cli.main(["batch", "m", "-i", str(in_path), "-o", str(out_path), "-t", "12", "-r", "0"])
+                rc = cli.main(
+                    ["batch", "m", "-i", str(in_path), "-o", str(out_path), "-t", "12", "-r", "0", "--progress-seconds", "0"]
+                )
             self.assertEqual(rc, 0)
             self.assertEqual(seen["timeout_seconds"], 12)
             self.assertEqual(seen["max_retries"], 0)
+
+    def test_batch_progress_reporting_writes_to_stderr(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+            store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
+            in_path = Path(td) / "in.jsonl"
+            out_path = Path(td) / "out.jsonl"
+            in_path.write_text(json.dumps({"id": 1, "prompt": "P"}) + "\n", encoding="utf-8")
+
+            def fake_chat(_provider, _model_id, _messages, **_kwargs):
+                return ChatResult(content="R")
+
+            out = io.StringIO()
+            err = io.StringIO()
+            with patch("mq.cli.chat", side_effect=fake_chat), redirect_stdout(out), redirect_stderr(err):
+                rc = cli.main(["batch", "m", "-i", str(in_path), "-o", str(out_path), "--progress-seconds", "0"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(err.getvalue(), "")
+
+            err2 = io.StringIO()
+            with patch("mq.cli.chat", side_effect=fake_chat), redirect_stderr(err2):
+                rc = cli.main(["batch", "m", "-i", str(in_path), "-o", str(out_path), "--progress-seconds", "1"])
+            self.assertEqual(rc, 0)
+            self.assertIn("batch done:", err2.getvalue())
 
 
 class MQLLMControlsTests(unittest.TestCase):

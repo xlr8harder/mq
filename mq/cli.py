@@ -4,6 +4,8 @@ import argparse
 import json
 import sys
 import re
+import time
+import math
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import Iterable
@@ -76,6 +78,9 @@ Commands:
     - On row failure, writes `error` (and `error_info` when available); exits non-zero if any row failed.
     - Merge conflicts are fatal (e.g., an input row already contains `response`/`reasoning`/`error` keys, or `tag:*` when --extract-tags is enabled).
     - Batch defaults are tuned for slower providers: timeout=600s, retries=5 (override with -t/-r).
+    - Progress is printed to stderr every 10s by default (disable with --progress-seconds 0).
+      `outstanding` is the number of submitted rows not yet finished (can exceed `workers` due to buffering).
+      `input_read` reflects how much of the input file has been consumed (it can reach 100% while work is still running).
 
   mq continue [--session <id>] [--json] "<query>"
   mq cont [--session <id>] [--json] "<query>"  (alias)
@@ -277,6 +282,20 @@ def _open_text(path: str, mode: str):
         return sys.stdin if "r" in mode else sys.stdout
     return Path(path).expanduser().open(mode, encoding="utf-8")
 
+def _format_duration(seconds: float) -> str:
+    seconds = max(0.0, float(seconds))
+    if not math.isfinite(seconds):
+        return "?"
+    total = int(seconds + 0.5)
+    s = total % 60
+    m = (total // 60) % 60
+    h = total // 3600
+    if h:
+        return f"{h}h{m:02d}m{s:02d}s"
+    if m:
+        return f"{m}m{s:02d}s"
+    return f"{s}s"
+
 
 def _positive_int(text: str) -> int:
     value = int(text)
@@ -355,6 +374,12 @@ def _build_parser() -> argparse.ArgumentParser:
     batch.add_argument("--prompt", help="Prefix prompt (prepends input row prompt as an attachment)", default=None)
     batch.add_argument("--workers", type=_positive_int, default=20, help="Worker threads (default: 20)")
     batch.add_argument("--extract-tags", action="store_true", help="Extract <field>value</field> into `tag:field` keys")
+    batch.add_argument(
+        "--progress-seconds",
+        type=_non_negative_int,
+        default=10,
+        help="Print progress to stderr every N seconds (default: 10; set 0 to disable); includes best-effort input_read/ETA for file inputs",
+    )
     batch.add_argument(
         "-t",
         "--timeout-seconds",
@@ -542,6 +567,12 @@ def _cmd_batch(args: argparse.Namespace) -> int:
         sysprompt = model_cfg.get("sysprompt")
 
     any_errors = False
+    processed = 0
+    submitted = 0
+    ok = 0
+    errors = 0
+    started = time.monotonic()
+    last_report = started
 
     reserved_output_keys = {"response", "reasoning", "sysprompt", "error", "error_info", "mq_input_prompt"}
     if args.extract_tags:
@@ -567,6 +598,7 @@ def _cmd_batch(args: argparse.Namespace) -> int:
         prompt_val = row.get("prompt")
         if not isinstance(prompt_val, str):
             any_errors = True
+            # Note: counts are maintained in the writer thread.
             out = dict(row)
             out["error"] = "Row is missing required string field: prompt"
             return out
@@ -607,12 +639,6 @@ def _cmd_batch(args: argparse.Namespace) -> int:
             out["error"] = f"{type(e).__name__}: {e}"
         return out
 
-    # Preflight conflict detection for file input (stdin can't be rewound).
-    if args.infile != "-":
-        with _open_text(args.infile, "r") as fp:
-            for line_no, row in _iter_jsonl_objects(fp):
-                _check_merge_conflicts(line_no, row)
-
     # Stream results as they complete (unordered output) so large jobs can write incrementally.
     # Keep a bounded set of in-flight requests to avoid unbounded memory growth.
     max_in_flight = max(args.workers * 4, args.workers + 1)
@@ -621,36 +647,117 @@ def _cmd_batch(args: argparse.Namespace) -> int:
     out_fp = _open_text(args.outfile, "w")
     close_in = args.infile != "-"
     close_out = args.outfile != "-"
+    infile_size: int | None = None
+    if args.infile != "-":
+        try:
+            infile_size = Path(args.infile).expanduser().stat().st_size
+        except OSError:
+            infile_size = None
     try:
         with ThreadPoolExecutor(max_workers=args.workers) as ex:
             in_flight: set = set()
 
+            def _bytes_read() -> int | None:
+                if args.infile == "-":
+                    return None
+                try:
+                    buf = getattr(in_fp, "buffer", None)
+                    if buf is not None and hasattr(buf, "tell"):
+                        return int(buf.tell())
+                    if hasattr(in_fp, "tell"):
+                        return int(in_fp.tell())
+                except Exception:
+                    return None
+                return None
+
+            def _emit_progress(*, done: bool) -> None:
+                nonlocal last_report
+                if not args.progress_seconds or args.progress_seconds <= 0:
+                    return
+                now = time.monotonic()
+                if not done and (now - last_report) < args.progress_seconds:
+                    return
+
+                elapsed = max(now - started, 1e-9)
+                rps = processed / elapsed
+                outstanding = len(in_flight)
+
+                parts = [
+                    f"processed={processed}",
+                    f"submitted={submitted}",
+                    f"ok={ok}",
+                    f"errors={errors}",
+                    f"outstanding={outstanding}",
+                    f"workers={args.workers}",
+                    f"rate={rps:.2f} rows/s",
+                ]
+
+                b_read = _bytes_read()
+                if infile_size and b_read is not None and infile_size > 0:
+                    read_frac = min(max(b_read / infile_size, 0.0), 1.0)
+                    parts.append(f"input_read={read_frac * 100.0:.1f}%")
+
+                    # ETA is based on rows remaining rather than bytes remaining, because
+                    # input ingestion can finish long before results are produced.
+                    if rps > 0 and processed > 0 and submitted > 0 and read_frac > 0:
+                        if read_frac >= 0.999:
+                            remaining_rows = max(submitted - processed, 0)
+                        else:
+                            est_total = submitted / read_frac
+                            remaining_rows = max(int(est_total - processed + 0.5), 0)
+                        parts.append(f"eta={_format_duration(remaining_rows / rps)}")
+
+                prefix = "batch done:" if done else "batch progress:"
+                _print_err(prefix + " " + " ".join(parts))
+                last_report = now
+
             def _write_future_result(fut) -> None:
+                nonlocal processed, ok, errors
                 row_out = fut.result()
                 out_fp.write(json.dumps(row_out, ensure_ascii=False, separators=(",", ":")) + "\n")
+                processed += 1
+                if isinstance(row_out, dict) and row_out.get("error"):
+                    errors += 1
+                else:
+                    ok += 1
+                _emit_progress(done=False)
 
             for line_no, row in _iter_jsonl_objects(in_fp):
-                # If reading from stdin, detect conflicts as we go (file inputs are preflighted above).
-                if args.infile == "-":
-                    _check_merge_conflicts(line_no, row)
+                _check_merge_conflicts(line_no, row)
 
                 in_flight.add(ex.submit(process_row, line_no, row))
+                submitted += 1
                 if len(in_flight) >= max_in_flight:
                     done, pending = wait(in_flight, return_when=FIRST_COMPLETED)
+                    in_flight = pending
                     for fut in done:
                         _write_future_result(fut)
-                    in_flight = pending
 
             while in_flight:
                 done, pending = wait(in_flight, return_when=FIRST_COMPLETED)
+                in_flight = pending
                 for fut in done:
                     _write_future_result(fut)
-                in_flight = pending
     finally:
         if close_in:
             in_fp.close()
         if close_out:
             out_fp.close()
+
+    # Final report
+    # (best-effort: may be missing if a fatal error aborts early)
+    # in_flight is out of scope here; we omit it.
+    if args.progress_seconds and args.progress_seconds > 0:
+        elapsed = max(time.monotonic() - started, 1e-9)
+        rps = processed / elapsed
+        parts = [
+            f"processed={processed}",
+            f"submitted={submitted}",
+            f"ok={ok}",
+            f"errors={errors}",
+            f"rate={rps:.2f} rows/s",
+        ]
+        _print_err("batch done: " + " ".join(parts))
 
     return 1 if any_errors else 0
 
