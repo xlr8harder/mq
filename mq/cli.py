@@ -26,6 +26,7 @@ from .store import (
     rename_session,
     save_session,
     select_session,
+    set_config_path_override,
     upsert_model,
 )
 
@@ -40,7 +41,7 @@ Quickstart:
 
 Configuration:
   - Default home: ~/.mq/ (override with MQ_HOME=/path)
-  - Model registry: ~/.mq/config.json
+  - Model registry: ~/.mq/config.json (override with `mq --config /path/to/config.json ...`)
   - Sessions: ~/.mq/sessions/<session>.json
   - Latest session pointer: ~/.mq/last_conversation.json (symlink or pointer file)
 
@@ -325,6 +326,10 @@ def _non_negative_int(text: str) -> int:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mq")
+    parser.add_argument(
+        "--config",
+        help="Override model registry config.json path (does not affect sessions)",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     help_cmd = sub.add_parser("help", help="Show detailed help")
@@ -852,6 +857,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     try:
+        if getattr(args, "config", None):
+            if args.config == "-":
+                raise UserError("--config cannot be '-' (stdin)")
+            set_config_path_override(Path(args.config).expanduser())
+        else:
+            set_config_path_override(None)
+
         match args.command:
             case "help":
                 return _cmd_help(args, parser)

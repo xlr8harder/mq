@@ -192,6 +192,7 @@ mq test gpt --provider openai gpt-4o-mini --save "hello"  # save on success
 ```
 
 Configuration is stored under `~/.mq/` by default (override with `MQ_HOME=/path`).
+Use `mq --config /path/to/config.json ...` to override just the model registry location (sessions still use `MQ_HOME`).
 
 Remove a configured shortname:
 

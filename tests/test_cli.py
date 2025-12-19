@@ -41,6 +41,24 @@ class MQCLITests(unittest.TestCase):
             self.assertEqual(rc, 0, err.getvalue())
             self.assertIn("gpt\topenai\tgpt-4o-mini", out.getvalue().strip())
 
+    def test_global_config_override_uses_alternate_model_registry_path(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+            alt_config = Path(td) / "alt-config.json"
+
+            rc = cli.main(["--config", str(alt_config), "add", "m", "--provider", "openai", "gpt-4o-mini"])
+            self.assertEqual(rc, 0)
+            self.assertTrue(alt_config.exists())
+
+            # Ensure the default MQ_HOME config.json is not created by this path.
+            self.assertFalse((Path(td) / "config.json").exists())
+
+            with patch("mq.cli.chat", return_value=ChatResult(content="A1")):
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    rc = cli.main(["--config", str(alt_config), "query", "m", "-n", "Q1"])
+            self.assertEqual(rc, 0)
+            self.assertTrue(out.getvalue().strip().endswith("A1"))
+
     def test_add_overwrites_existing_entry(self):
         with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt="S1")

@@ -15,6 +15,8 @@ CONFIG_VERSION = 1
 SESSION_VERSION = 1
 SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
+_CONFIG_PATH_OVERRIDE: Path | None = None
+
 
 def mq_home() -> Path:
     override = os.getenv("MQ_HOME")
@@ -30,7 +32,14 @@ def ensure_home() -> Path:
 
 
 def config_path() -> Path:
+    if _CONFIG_PATH_OVERRIDE is not None:
+        return _CONFIG_PATH_OVERRIDE
     return ensure_home() / "config.json"
+
+
+def set_config_path_override(path: Path | None) -> None:
+    global _CONFIG_PATH_OVERRIDE
+    _CONFIG_PATH_OVERRIDE = path
 
 
 def last_conversation_path() -> Path:
