@@ -4,6 +4,12 @@
 
 - TBD
 
+## 0.2.1 (2025-12-19)
+
+- Add global `mq --config PATH ...` to override the model registry location.
+- Add `mq query --sysprompt-file` and enforce single-stdin consumption across query/attach/sysprompt-file.
+- Improve `mq batch` progress reporting semantics and ETA.
+
 ## 0.2.0 (2025-12-19)
 
 - Add `mq batch` for concurrent JSONL → JSONL processing with progress reporting.
