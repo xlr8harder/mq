@@ -60,7 +60,7 @@ Commands:
   mq models
     - Lists configured shortnames.
 
-  mq query <shortname> [-s/--sysprompt ...] [--json] [-n/--no-session] [--session <id>] "<query>"
+  mq query <shortname> [-s/--sysprompt ... | --sysprompt-file PATH] [--json] [-n/--no-session] [--session <id>] "<query>"
   mq ask <shortname> ...          (alias for `mq query`)
   mq q <shortname> ...            (short alias for `mq query`)
     - Runs a one-off query against a configured model.
@@ -115,6 +115,7 @@ Request controls:
 stdin:
   - For query/continue/test, pass "-" as the query to read the full prompt from stdin.
   - Use --attach PATH to append file contents into the prompt (repeatable; PATH may be "-").
+  - Use --sysprompt-file PATH to load system prompt from a file; PATH may be "-" for stdin.
   - stdin can only be consumed once, so you can't combine query "-" with --attach "-".
   - For batch, you may pass '-' to -i/--infile (stdin) and/or -o/--outfile (stdout).
 """
@@ -206,6 +207,17 @@ def _resolve_query(query: str) -> str:
     if query == "-":
         return sys.stdin.read().rstrip("\n")
     return query
+
+def _assert_stdin_not_double_used(*, query: str | None, attach_paths: Iterable[str] | None, sysprompt_file: str | None) -> None:
+    stdin_users = 0
+    if query == "-":
+        stdin_users += 1
+    if sysprompt_file == "-":
+        stdin_users += 1
+    if attach_paths:
+        stdin_users += sum(1 for p in attach_paths if p == "-")
+    if stdin_users > 1:
+        raise UserError("stdin can only be consumed once; avoid using '-' for multiple inputs (query, --attach, --sysprompt-file)")
 
 
 def _read_attach(path: str) -> tuple[str, str]:
@@ -330,6 +342,7 @@ def _build_parser() -> argparse.ArgumentParser:
     query = sub.add_parser("query", aliases=["ask", "q"], help="Query a configured model")
     query.add_argument("shortname")
     query.add_argument("--sysprompt", "-s", help="Override system prompt for this run")
+    query.add_argument("--sysprompt-file", help="Read system prompt from file ('-' for stdin)")
     query.add_argument("--json", action="store_true", help="Emit a single-line JSON object")
     query.add_argument("-n", "--no-session", action="store_true", help="Do not create or update a session")
     query.add_argument("--session", help="Create a new named session id (collision = error)")
@@ -437,11 +450,13 @@ def _cmd_query(args: argparse.Namespace) -> int:
     model_cfg = get_model(args.shortname)
     provider = model_cfg["provider"]
     model = model_cfg["model"]
-    sysprompt = args.sysprompt if args.sysprompt is not None else model_cfg.get("sysprompt")
+    override_sysprompt = _resolve_sysprompt(sysprompt=args.sysprompt, sysprompt_file=args.sysprompt_file)
+    sysprompt = override_sysprompt if override_sysprompt is not None else model_cfg.get("sysprompt")
 
     messages: list[dict] = []
     if sysprompt:
         messages.append({"role": "system", "content": sysprompt})
+    _assert_stdin_not_double_used(query=args.query, attach_paths=args.attach, sysprompt_file=args.sysprompt_file)
     raw_query = _resolve_query(args.query)
     query = _apply_attachments_to_prompt(raw_query, args.attach)
     messages.append({"role": "user", "content": query})
@@ -539,6 +554,7 @@ def _cmd_test(args: argparse.Namespace) -> int:
     sysprompt = _resolve_sysprompt(sysprompt=args.sysprompt, sysprompt_file=args.sysprompt_file)
     if sysprompt:
         messages.append({"role": "system", "content": sysprompt})
+    _assert_stdin_not_double_used(query=args.query, attach_paths=args.attach, sysprompt_file=args.sysprompt_file)
     raw_query = _resolve_query(args.query)
     query = _apply_attachments_to_prompt(raw_query, args.attach)
     messages.append({"role": "user", "content": query})
@@ -562,6 +578,7 @@ def _cmd_batch(args: argparse.Namespace) -> int:
     model_cfg = get_model(args.shortname)
     provider = model_cfg["provider"]
     model = model_cfg["model"]
+    _assert_stdin_not_double_used(query=None, attach_paths=[], sysprompt_file=args.sysprompt_file if args.infile == "-" else None)
     sysprompt = _resolve_sysprompt(sysprompt=args.sysprompt, sysprompt_file=args.sysprompt_file)
     if sysprompt is None:
         sysprompt = model_cfg.get("sysprompt")

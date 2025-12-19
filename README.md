@@ -243,3 +243,9 @@ Override system prompt at query time:
 ```bash
 mq query gpt -s "You are terse and technical." "Explain monads"
 ```
+
+Load system prompt from a file:
+
+```bash
+mq query gpt --sysprompt-file sysprompt.txt "Explain monads"
+```

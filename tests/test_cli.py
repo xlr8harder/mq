@@ -190,6 +190,36 @@ class MQCLITests(unittest.TestCase):
             self.assertEqual(session2["sysprompt"], "OVERRIDE")
             self.assertEqual([m["role"] for m in session2["messages"]][-2:], ["user", "assistant"])
 
+    def test_query_sysprompt_file_overrides_saved_sysprompt(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+            store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt="SAVED")
+            prompt_path = Path(td) / "sys.txt"
+            prompt_path.write_text("FILE\n", encoding="utf-8")
+
+            def fake_chat(_provider, _model_id, messages, **_kwargs):
+                self.assertEqual(messages[0]["role"], "system")
+                self.assertEqual(messages[0]["content"], "FILE")
+                return ChatResult(content="A1")
+
+            with patch("mq.cli.chat", side_effect=fake_chat):
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    rc = cli.main(["query", "m", "--sysprompt-file", str(prompt_path), "Q1"])
+            self.assertEqual(rc, 0)
+            session = store.load_latest_session()
+            self.assertEqual(session["sysprompt"], "FILE")
+
+    def test_query_sysprompt_file_stdin_conflict_errors(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+            store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
+            err = io.StringIO()
+            stdin = io.StringIO("SYS\nPROMPT\n")
+            out = io.StringIO()
+            with patch("sys.stdin", stdin), redirect_stdout(out), redirect_stderr(err):
+                rc = cli.main(["query", "m", "--sysprompt-file", "-", "-"])
+            self.assertEqual(rc, 2)
+            self.assertIn("stdin can only be consumed once", err.getvalue())
+
     def test_dump_outputs_json(self):
         with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
