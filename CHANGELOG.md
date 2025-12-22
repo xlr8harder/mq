@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- TBD
+- Add `--prompt-file` for `mq query`/`mq continue`/`mq test`.
+- Allow `--config` to appear anywhere in the command line.
 
 ## 0.2.1 (2025-12-19)
 
