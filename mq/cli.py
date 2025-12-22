@@ -54,14 +54,14 @@ Commands:
   mq add <shortname> --provider <provider> <model> [--sysprompt ... | --sysprompt-file PATH]
     - Saves/overwrites a model alias in config.json (no network request).
 
-  mq test <shortname> --provider <provider> <model> [--sysprompt ... | --sysprompt-file PATH] [--json] [--save] "<query>"
+  mq test <shortname> --provider <provider> <model> [--sysprompt ... | --sysprompt-file PATH] [--prompt-file PATH] [--json] [--save] "<query>"
     - Validates the provider/model by making a request.
     - By default it does NOT modify config; pass --save to persist/overwrite the alias on success.
 
   mq models
     - Lists configured shortnames.
 
-  mq query <shortname> [-s/--sysprompt ... | --sysprompt-file PATH] [--json] [-n/--no-session] [--session <id>] "<query>"
+  mq query <shortname> [-s/--sysprompt ... | --sysprompt-file PATH] [--prompt-file PATH] [--json] [-n/--no-session] [--session <id>] "<query>"
   mq ask <shortname> ...          (alias for `mq query`)
   mq q <shortname> ...            (short alias for `mq query`)
     - Runs a one-off query against a configured model.
@@ -83,7 +83,7 @@ Commands:
       `outstanding` is the number of submitted rows not yet finished (can exceed `workers` due to buffering).
       `input_read` reflects how much of the input file has been consumed (it can reach 100% while work is still running).
 
-  mq continue [--session <id>] [--json] "<query>"
+  mq continue [--session <id>] [--prompt-file PATH] [--json] "<query>"
   mq cont [--session <id>] [--json] "<query>"  (alias)
   mq c [--session <id>] [--json] "<query>"     (short alias)
     - Continues a prior session (default: latest).
@@ -115,6 +115,7 @@ Request controls:
 
 stdin:
   - For query/continue/test, pass "-" as the query to read the full prompt from stdin.
+  - Alternatively, use --prompt-file PATH to read the full prompt from a file; PATH may be "-" for stdin.
   - Use --attach PATH to append file contents into the prompt (repeatable; PATH may be "-").
   - Use --sysprompt-file PATH to load system prompt from a file; PATH may be "-" for stdin.
   - stdin can only be consumed once, so you can't combine query "-" with --attach "-".
@@ -209,16 +210,47 @@ def _resolve_query(query: str) -> str:
         return sys.stdin.read().rstrip("\n")
     return query
 
-def _assert_stdin_not_double_used(*, query: str | None, attach_paths: Iterable[str] | None, sysprompt_file: str | None) -> None:
+
+def _read_prompt_file(path: str) -> str:
+    try:
+        if path == "-":
+            return sys.stdin.read()
+        return Path(path).expanduser().read_text(encoding="utf-8")
+    except OSError as e:
+        raise UserError(f"Failed to read prompt file {path!r}: {e}") from e
+
+
+def _resolve_prompt(*, query: str | None, prompt_file: str | None) -> str:
+    if query is not None and prompt_file is not None:
+        raise MQError("Use only one of <query> or --prompt-file")
+    if prompt_file is not None:
+        return _read_prompt_file(prompt_file).rstrip("\n")
+    if query is None:
+        raise MQError("Missing query (provide <query> or --prompt-file)")
+    return _resolve_query(query)
+
+
+def _assert_stdin_not_double_used(
+    *,
+    query: str | None,
+    prompt_file: str | None,
+    attach_paths: Iterable[str] | None,
+    sysprompt_file: str | None,
+) -> None:
     stdin_users = 0
     if query == "-":
+        stdin_users += 1
+    if prompt_file == "-":
         stdin_users += 1
     if sysprompt_file == "-":
         stdin_users += 1
     if attach_paths:
         stdin_users += sum(1 for p in attach_paths if p == "-")
     if stdin_users > 1:
-        raise UserError("stdin can only be consumed once; avoid using '-' for multiple inputs (query, --attach, --sysprompt-file)")
+        raise UserError(
+            "stdin can only be consumed once; avoid using '-' for multiple inputs "
+            "(query, --prompt-file, --attach, --sysprompt-file)"
+        )
 
 
 def _read_attach(path: str) -> tuple[str, str]:
@@ -352,17 +384,19 @@ def _build_parser() -> argparse.ArgumentParser:
     query.add_argument("-n", "--no-session", action="store_true", help="Do not create or update a session")
     query.add_argument("--session", help="Create a new named session id (collision = error)")
     query.add_argument("--attach", action="append", help="Append file content to the prompt ('-' for stdin)", default=[])
+    query.add_argument("--prompt-file", help="Read prompt text from file ('-' for stdin)")
     query.add_argument("-t", "--timeout-seconds", type=_positive_int, help="Request timeout in seconds (default: 600)")
     query.add_argument("-r", "--retries", type=_non_negative_int, help="Max retries for retryable errors (default: 3)")
-    query.add_argument("query")
+    query.add_argument("query", nargs="?")
 
     cont = sub.add_parser("continue", aliases=["cont", "c"], help="Continue the most recent conversation")
     cont.add_argument("--session", help="Continue a specific session id (default: latest)")
     cont.add_argument("--json", action="store_true", help="Emit a single-line JSON object")
     cont.add_argument("--attach", action="append", help="Append file content to the prompt ('-' for stdin)", default=[])
+    cont.add_argument("--prompt-file", help="Read prompt text from file ('-' for stdin)")
     cont.add_argument("-t", "--timeout-seconds", type=_positive_int, help="Request timeout in seconds (default: 600)")
     cont.add_argument("-r", "--retries", type=_non_negative_int, help="Max retries for retryable errors (default: 3)")
-    cont.add_argument("query")
+    cont.add_argument("query", nargs="?")
 
     dump = sub.add_parser("dump", help="Dump the latest session context as JSON")
     dump.add_argument("--session", help="Dump a specific session id (default: latest)")
@@ -379,9 +413,10 @@ def _build_parser() -> argparse.ArgumentParser:
     test.add_argument("--json", action="store_true", help="Emit a single-line JSON object")
     test.add_argument("--save", action="store_true", help="Save/overwrite this shortname on success")
     test.add_argument("--attach", action="append", help="Append file content to the prompt ('-' for stdin)", default=[])
+    test.add_argument("--prompt-file", help="Read prompt text from file ('-' for stdin)")
     test.add_argument("-t", "--timeout-seconds", type=_positive_int, help="Request timeout in seconds (default: 600)")
     test.add_argument("-r", "--retries", type=_non_negative_int, help="Max retries for retryable errors (default: 3)")
-    test.add_argument("query")
+    test.add_argument("query", nargs="?")
 
     batch = sub.add_parser("batch", help="Process a JSONL file with prompts and write JSONL responses")
     batch.add_argument("shortname")
@@ -425,6 +460,36 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _extract_global_config(argv: list[str] | None) -> tuple[list[str] | None, str | None]:
+    """
+    Allow `--config` to appear anywhere in the command line (before or after subcommands).
+
+    Returns (cleaned_argv, config_value).
+    """
+    if argv is None:
+        return None, None
+
+    cleaned: list[str] = []
+    config_value: str | None = None
+    idx = 0
+    while idx < len(argv):
+        token = argv[idx]
+        if token == "--config":
+            if idx + 1 >= len(argv):
+                raise UserError("--config requires a value")
+            config_value = argv[idx + 1]
+            idx += 2
+            continue
+        if token.startswith("--config="):
+            config_value = token.split("=", 1)[1]
+            idx += 1
+            continue
+        cleaned.append(token)
+        idx += 1
+
+    return cleaned, config_value
+
+
 def _cmd_add(args: argparse.Namespace) -> int:
     ensure_home()
     try:
@@ -461,8 +526,13 @@ def _cmd_query(args: argparse.Namespace) -> int:
     messages: list[dict] = []
     if sysprompt:
         messages.append({"role": "system", "content": sysprompt})
-    _assert_stdin_not_double_used(query=args.query, attach_paths=args.attach, sysprompt_file=args.sysprompt_file)
-    raw_query = _resolve_query(args.query)
+    _assert_stdin_not_double_used(
+        query=args.query,
+        prompt_file=args.prompt_file,
+        attach_paths=args.attach,
+        sysprompt_file=args.sysprompt_file,
+    )
+    raw_query = _resolve_prompt(query=args.query, prompt_file=args.prompt_file)
     query = _apply_attachments_to_prompt(raw_query, args.attach)
     messages.append({"role": "user", "content": query})
 
@@ -515,7 +585,13 @@ def _cmd_continue(args: argparse.Namespace) -> int:
         _print_err("warning: --json output does not include full conversation context (use `mq dump` for history)")
 
     messages = list(messages)
-    raw_query = _resolve_query(args.query)
+    _assert_stdin_not_double_used(
+        query=args.query,
+        prompt_file=args.prompt_file,
+        attach_paths=args.attach,
+        sysprompt_file=None,
+    )
+    raw_query = _resolve_prompt(query=args.query, prompt_file=args.prompt_file)
     query = _apply_attachments_to_prompt(raw_query, args.attach)
     messages.append({"role": "user", "content": query})
 
@@ -559,8 +635,13 @@ def _cmd_test(args: argparse.Namespace) -> int:
     sysprompt = _resolve_sysprompt(sysprompt=args.sysprompt, sysprompt_file=args.sysprompt_file)
     if sysprompt:
         messages.append({"role": "system", "content": sysprompt})
-    _assert_stdin_not_double_used(query=args.query, attach_paths=args.attach, sysprompt_file=args.sysprompt_file)
-    raw_query = _resolve_query(args.query)
+    _assert_stdin_not_double_used(
+        query=args.query,
+        prompt_file=args.prompt_file,
+        attach_paths=args.attach,
+        sysprompt_file=args.sysprompt_file,
+    )
+    raw_query = _resolve_prompt(query=args.query, prompt_file=args.prompt_file)
     query = _apply_attachments_to_prompt(raw_query, args.attach)
     messages.append({"role": "user", "content": query})
 
@@ -583,7 +664,12 @@ def _cmd_batch(args: argparse.Namespace) -> int:
     model_cfg = get_model(args.shortname)
     provider = model_cfg["provider"]
     model = model_cfg["model"]
-    _assert_stdin_not_double_used(query=None, attach_paths=[], sysprompt_file=args.sysprompt_file if args.infile == "-" else None)
+    _assert_stdin_not_double_used(
+        query=None,
+        prompt_file=None,
+        attach_paths=[],
+        sysprompt_file=args.sysprompt_file if args.infile == "-" else None,
+    )
     sysprompt = _resolve_sysprompt(sysprompt=args.sysprompt, sysprompt_file=args.sysprompt_file)
     if sysprompt is None:
         sysprompt = model_cfg.get("sysprompt")
@@ -855,12 +941,14 @@ def _cmd_help(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
+    argv, extracted_config = _extract_global_config(argv)
     args = parser.parse_args(argv)
     try:
-        if getattr(args, "config", None):
-            if args.config == "-":
+        config_path = extracted_config if extracted_config is not None else getattr(args, "config", None)
+        if config_path:
+            if config_path == "-":
                 raise UserError("--config cannot be '-' (stdin)")
-            set_config_path_override(Path(args.config).expanduser())
+            set_config_path_override(Path(config_path).expanduser())
         else:
             set_config_path_override(None)
 

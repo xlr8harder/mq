@@ -59,6 +59,20 @@ class MQCLITests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertTrue(out.getvalue().strip().endswith("A1"))
 
+    def test_global_config_override_can_appear_after_subcommand(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+            alt_config = Path(td) / "alt-config.json"
+            rc = cli.main(["add", "m", "--provider", "openai", "gpt-4o-mini", "--config", str(alt_config)])
+            self.assertEqual(rc, 0)
+            self.assertTrue(alt_config.exists())
+
+    def test_global_config_override_can_use_equals_form(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+            alt_config = Path(td) / "alt-config.json"
+            rc = cli.main(["add", "m", "--provider", "openai", "gpt-4o-mini", f"--config={alt_config}"])
+            self.assertEqual(rc, 0)
+            self.assertTrue(alt_config.exists())
+
     def test_add_overwrites_existing_entry(self):
         with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt="S1")
@@ -226,6 +240,45 @@ class MQCLITests(unittest.TestCase):
             self.assertEqual(rc, 0)
             session = store.load_latest_session()
             self.assertEqual(session["sysprompt"], "FILE")
+
+    def test_query_prompt_file_reads_prompt_text(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+            store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
+            prompt_path = Path(td) / "prompt.txt"
+            prompt_path.write_text("FROMFILE\n", encoding="utf-8")
+
+            def fake_chat(_provider, _model_id, messages, **_kwargs):
+                self.assertEqual(messages[-1]["role"], "user")
+                self.assertEqual(messages[-1]["content"], "FROMFILE")
+                return ChatResult(content="A1")
+
+            with patch("mq.cli.chat", side_effect=fake_chat):
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    rc = cli.main(["query", "m", "--prompt-file", str(prompt_path)])
+            self.assertEqual(rc, 0)
+            self.assertTrue(out.getvalue().strip().endswith("A1"))
+
+    def test_query_prompt_file_and_query_conflict_errors(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+            store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
+            prompt_path = Path(td) / "prompt.txt"
+            prompt_path.write_text("FROMFILE\n", encoding="utf-8")
+            err = io.StringIO()
+            with redirect_stderr(err):
+                rc = cli.main(["query", "m", "--prompt-file", str(prompt_path), "Q1"])
+            self.assertEqual(rc, 2)
+            self.assertIn("--prompt-file", err.getvalue())
+
+    def test_query_prompt_file_stdin_conflict_errors(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+            store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
+            err = io.StringIO()
+            stdin = io.StringIO("PROMPT\n")
+            with patch("sys.stdin", stdin), redirect_stderr(err):
+                rc = cli.main(["query", "m", "--prompt-file", "-", "--sysprompt-file", "-", "Q1"])
+            self.assertEqual(rc, 2)
+            self.assertIn("stdin can only be consumed once", err.getvalue())
 
     def test_query_sysprompt_file_stdin_conflict_errors(self):
         with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
