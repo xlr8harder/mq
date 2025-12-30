@@ -64,6 +64,7 @@ Commands:
   mq query <shortname> [-s/--sysprompt ... | --sysprompt-file PATH] [--prompt-file PATH] [--json] [-n/--no-session] [--session <id>] "<query>"
   mq ask <shortname> ...          (alias for `mq query`)
   mq q <shortname> ...            (short alias for `mq query`)
+  mq new-session <shortname> ...  (alias for `mq query`)
     - Runs a one-off query against a configured model.
     - By default creates a new session and prints `session: <id>` first.
     - Use -n/--no-session for ephemeral asks (no session file, no pointer update).
@@ -163,6 +164,7 @@ def _emit_result(
     prompt: str | None = None,
     sysprompt: str | None = None,
     session_id: str | None = None,
+    helper: str | None = None,
 ) -> None:
     if json_mode:
         payload: dict[str, str] = {"response": response}
@@ -179,6 +181,8 @@ def _emit_result(
 
     if session_id is not None:
         print(f"session: {session_id}")
+        if helper:
+            print(f"tip: {helper}")
 
     if reasoning and reasoning.strip():
         print("reasoning:")
@@ -376,7 +380,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     models = sub.add_parser("models", help="List configured models")
 
-    query = sub.add_parser("query", aliases=["ask", "q"], help="Query a configured model")
+    query = sub.add_parser("query", aliases=["ask", "q", "new-session"], help="Query a configured model")
     query.add_argument("shortname")
     query.add_argument("--sysprompt", "-s", help="Override system prompt for this run")
     query.add_argument("--sysprompt-file", help="Read system prompt from file ('-' for stdin)")
@@ -567,6 +571,10 @@ def _cmd_query(args: argparse.Namespace) -> int:
         prompt=query,
         sysprompt=sysprompt,
         session_id=session_id,
+        helper=(
+            f"continue with `mq continue \"<your message>\"` "
+            f"(or `mq continue --session {session_id} \"<your message>\"`)"
+        )
     )
     return 0
 
@@ -959,7 +967,7 @@ def main(argv: list[str] | None = None) -> int:
                 return _cmd_add(args)
             case "models":
                 return _cmd_models(args)
-            case "query" | "ask" | "q":
+            case "query" | "ask" | "q" | "new-session":
                 return _cmd_query(args)
             case "continue" | "cont" | "c":
                 return _cmd_continue(args)

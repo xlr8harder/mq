@@ -4,6 +4,8 @@
 
 - Add `--prompt-file` for `mq query`/`mq continue`/`mq test`.
 - Allow `--config` to appear anywhere in the command line.
+- Add `mq new-session` alias for `mq query`.
+- Print a `mq continue` tip after `mq query` (non-JSON output).
 
 ## 0.2.1 (2025-12-19)
 

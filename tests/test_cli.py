@@ -134,6 +134,7 @@ class MQCLITests(unittest.TestCase):
                 self.assertEqual(rc, 0)
                 self.assertTrue(out.getvalue().startswith("session: "))
                 self.assertTrue(out.getvalue().strip().endswith("A1"))
+                self.assertIn("mq continue", out.getvalue())
 
             sessions = store.list_sessions()
             self.assertEqual(len(sessions), 1)
@@ -149,11 +150,25 @@ class MQCLITests(unittest.TestCase):
                 self.assertEqual(rc, 0)
                 self.assertTrue(out.getvalue().startswith("session: "))
                 self.assertTrue(out.getvalue().strip().endswith("A2"))
+                self.assertIn("mq continue", out.getvalue())
 
             sessions2 = store.list_sessions()
             self.assertEqual(len(sessions2), 2)
+
+    def test_new_session_alias_behaves_like_query(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+            store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
+            with patch("mq.cli.chat", return_value=ChatResult(content="A1")):
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    rc = cli.main(["new-session", "m", "Q1"])
+            self.assertEqual(rc, 0)
+            self.assertTrue(out.getvalue().startswith("session: "))
+            session_id = out.getvalue().splitlines()[0].split("session: ", 1)[1].strip()
+            self.assertIn(session_id, out.getvalue())
+            self.assertIn("mq continue", out.getvalue())
             latest2 = store.load_latest_session()
-            self.assertEqual([m["content"] for m in latest2["messages"]], ["Q2", "A2"])
+            self.assertEqual([m["content"] for m in latest2["messages"]], ["Q1", "A1"])
 
     def test_continue_appends_and_short_aliases(self):
         with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
