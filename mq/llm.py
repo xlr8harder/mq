@@ -107,11 +107,29 @@ def chat(
     *,
     timeout_seconds: int | None = None,
     max_retries: int | None = None,
+    temperature: float | None = None,
+    top_p: float | None = None,
+    top_k: int | None = None,
 ) -> ChatResult:
     provider = get_provider(provider_name)
     timeout = DEFAULT_TIMEOUT_SECONDS if timeout_seconds is None else timeout_seconds
     retries = DEFAULT_MAX_RETRIES if max_retries is None else max_retries
-    response = retry_request(provider, messages=messages, model_id=model_id, timeout=timeout, max_retries=retries)
+    options: dict[str, object] = {}
+    if temperature is not None:
+        options["temperature"] = float(temperature)
+    if top_p is not None:
+        options["top_p"] = float(top_p)
+    if top_k is not None:
+        options["top_k"] = int(top_k)
+
+    response = retry_request(
+        provider,
+        messages=messages,
+        model_id=model_id,
+        timeout=timeout,
+        max_retries=retries,
+        **options,
+    )
     if not response.success:
         base_error_info = response.error_info or {}
         status_code = base_error_info.get("status_code")

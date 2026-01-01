@@ -53,10 +53,11 @@ Commands:
 
   mq add <shortname> --provider <provider> <model> [--sysprompt ... | --sysprompt-file PATH]
     - Saves/overwrites a model alias in config.json (no network request).
+    - You can store default sampling params on the alias: --temperature/--top-p/--top-k.
 
-  mq test <shortname> --provider <provider> <model> [--sysprompt ... | --sysprompt-file PATH] [--prompt-file PATH] [--json] [--save] "<query>"
+  mq test --provider <provider> <model> [--sysprompt ... | --sysprompt-file PATH] [--prompt-file PATH] [--json] [--save <shortname>] "<query>"
     - Validates the provider/model by making a request.
-    - By default it does NOT modify config; pass --save to persist/overwrite the alias on success.
+    - By default it does NOT modify config; pass --save <shortname> to persist/overwrite an alias on success.
 
   mq models
     - Lists configured shortnames.
@@ -114,6 +115,7 @@ Request controls:
   - -t/--timeout-seconds N  (default: 600)
   - -r/--retries N          (default: 3)
   - Timeout applies per request attempt; retries control how many additional attempts are made for retryable errors.
+  - Sampling: --temperature, --top-p, --top-k (forwarded to provider; unsupported options will error)
 
 stdin:
   - For query/continue/test, pass "-" as the query to read the full prompt from stdin.
@@ -361,6 +363,20 @@ def _non_negative_int(text: str) -> int:
     return value
 
 
+def _non_negative_float(text: str) -> float:
+    value = float(text)
+    if not math.isfinite(value) or value < 0:
+        raise argparse.ArgumentTypeError("must be a finite number >= 0")
+    return value
+
+
+def _unit_float(text: str) -> float:
+    value = float(text)
+    if not math.isfinite(value) or value < 0 or value > 1:
+        raise argparse.ArgumentTypeError("must be a finite number between 0 and 1")
+    return value
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mq")
     parser.add_argument(
@@ -378,6 +394,9 @@ def _build_parser() -> argparse.ArgumentParser:
     add.add_argument("model", help="Full model identifier")
     add.add_argument("--sysprompt", help="Saved system prompt for this model")
     add.add_argument("--sysprompt-file", help="Read saved system prompt from file ('-' for stdin)")
+    add.add_argument("--temperature", type=_non_negative_float, help="Default sampling temperature (saved in config)")
+    add.add_argument("--top-p", dest="top_p", type=_unit_float, help="Default sampling top_p (saved in config)")
+    add.add_argument("--top-k", dest="top_k", type=_non_negative_int, help="Default sampling top_k (saved in config)")
 
     models = sub.add_parser("models", help="List configured models")
 
@@ -390,6 +409,9 @@ def _build_parser() -> argparse.ArgumentParser:
     query.add_argument("--session", help="Create a new named session id (collision = error)")
     query.add_argument("--attach", action="append", help="Append file content to the prompt ('-' for stdin)", default=[])
     query.add_argument("--prompt-file", help="Read prompt text from file ('-' for stdin)")
+    query.add_argument("--temperature", type=_non_negative_float, help="Sampling temperature override")
+    query.add_argument("--top-p", dest="top_p", type=_unit_float, help="Sampling top_p override")
+    query.add_argument("--top-k", dest="top_k", type=_non_negative_int, help="Sampling top_k override")
     query.add_argument("-t", "--timeout-seconds", type=_positive_int, help="Request timeout in seconds (default: 600)")
     query.add_argument("-r", "--retries", type=_non_negative_int, help="Max retries for retryable errors (default: 3)")
     query.add_argument("query", nargs="?")
@@ -399,6 +421,9 @@ def _build_parser() -> argparse.ArgumentParser:
     cont.add_argument("--json", action="store_true", help="Emit a single-line JSON object")
     cont.add_argument("--attach", action="append", help="Append file content to the prompt ('-' for stdin)", default=[])
     cont.add_argument("--prompt-file", help="Read prompt text from file ('-' for stdin)")
+    cont.add_argument("--temperature", type=_non_negative_float, help="Sampling temperature override")
+    cont.add_argument("--top-p", dest="top_p", type=_unit_float, help="Sampling top_p override")
+    cont.add_argument("--top-k", dest="top_k", type=_non_negative_int, help="Sampling top_k override")
     cont.add_argument("-t", "--timeout-seconds", type=_positive_int, help="Request timeout in seconds (default: 600)")
     cont.add_argument("-r", "--retries", type=_non_negative_int, help="Max retries for retryable errors (default: 3)")
     cont.add_argument("query", nargs="?")
@@ -410,15 +435,17 @@ def _build_parser() -> argparse.ArgumentParser:
     rm.add_argument("shortname")
 
     test = sub.add_parser("test", help="Test a provider/model configuration (optionally save with --save)")
-    test.add_argument("shortname")
     test.add_argument("--provider", required=True, help="Provider name (llm_client)")
     test.add_argument("model", help="Full model identifier")
     test.add_argument("--sysprompt", help="Saved system prompt for this model")
     test.add_argument("--sysprompt-file", help="Read saved system prompt from file ('-' for stdin)")
     test.add_argument("--json", action="store_true", help="Emit a single-line JSON object")
-    test.add_argument("--save", action="store_true", help="Save/overwrite this shortname on success")
+    test.add_argument("--save", metavar="SHORTNAME", help="Save/overwrite this shortname on success")
     test.add_argument("--attach", action="append", help="Append file content to the prompt ('-' for stdin)", default=[])
     test.add_argument("--prompt-file", help="Read prompt text from file ('-' for stdin)")
+    test.add_argument("--temperature", type=_non_negative_float, help="Sampling temperature override (and saved with --save)")
+    test.add_argument("--top-p", dest="top_p", type=_unit_float, help="Sampling top_p override (and saved with --save)")
+    test.add_argument("--top-k", dest="top_k", type=_non_negative_int, help="Sampling top_k override (and saved with --save)")
     test.add_argument("-t", "--timeout-seconds", type=_positive_int, help="Request timeout in seconds (default: 600)")
     test.add_argument("-r", "--retries", type=_non_negative_int, help="Max retries for retryable errors (default: 3)")
     test.add_argument("query", nargs="?")
@@ -430,6 +457,9 @@ def _build_parser() -> argparse.ArgumentParser:
     batch.add_argument("--sysprompt", "-s", help="Override system prompt for this run")
     batch.add_argument("--sysprompt-file", help="Read system prompt from file ('-' for stdin)")
     batch.add_argument("--prompt", help="Prefix prompt (prepends input row prompt as an attachment)", default=None)
+    batch.add_argument("--temperature", type=_non_negative_float, help="Sampling temperature override")
+    batch.add_argument("--top-p", dest="top_p", type=_unit_float, help="Sampling top_p override")
+    batch.add_argument("--top-k", dest="top_k", type=_non_negative_int, help="Sampling top_k override")
     batch.add_argument("--workers", type=_positive_int, default=20, help="Worker threads (default: 20)")
     batch.add_argument("--extract-tags", action="store_true", help="Extract <field>value</field> into `tag:field` keys")
     batch.add_argument(
@@ -503,7 +533,15 @@ def _cmd_add(args: argparse.Namespace) -> int:
         _print_err(str(e))
         return 2
     sysprompt = _resolve_sysprompt(sysprompt=args.sysprompt, sysprompt_file=args.sysprompt_file)
-    upsert_model(args.shortname, args.provider, args.model, sysprompt)
+    upsert_model(
+        args.shortname,
+        args.provider,
+        args.model,
+        sysprompt,
+        temperature=args.temperature,
+        top_p=args.top_p,
+        top_k=args.top_k,
+    )
     return 0
 
 
@@ -525,6 +563,9 @@ def _cmd_query(args: argparse.Namespace) -> int:
     model_cfg = get_model(args.shortname)
     provider = model_cfg["provider"]
     model = model_cfg["model"]
+    temperature = args.temperature if args.temperature is not None else model_cfg.get("temperature")
+    top_p = args.top_p if args.top_p is not None else model_cfg.get("top_p")
+    top_k = args.top_k if args.top_k is not None else model_cfg.get("top_k")
     override_sysprompt = _resolve_sysprompt(sysprompt=args.sysprompt, sysprompt_file=args.sysprompt_file)
     sysprompt = override_sysprompt if override_sysprompt is not None else model_cfg.get("sysprompt")
 
@@ -541,7 +582,16 @@ def _cmd_query(args: argparse.Namespace) -> int:
     query = _apply_attachments_to_prompt(raw_query, args.attach)
     messages.append({"role": "user", "content": query})
 
-    result = chat(provider, model, messages, timeout_seconds=args.timeout_seconds, max_retries=args.retries)
+    result = chat(
+        provider,
+        model,
+        messages,
+        timeout_seconds=args.timeout_seconds,
+        max_retries=args.retries,
+        temperature=temperature,
+        top_p=top_p,
+        top_k=top_k,
+    )
 
     if args.no_session:
         if args.session:
@@ -590,6 +640,20 @@ def _cmd_continue(args: argparse.Namespace) -> int:
         _print_err("Invalid last conversation format")
         return 2
 
+    # Prefer persisted per-model defaults (if the model shortname still exists),
+    # but continue should still work if the model alias was removed.
+    defaults: dict | None = None
+    shortname = session.get("model_shortname")
+    if isinstance(shortname, str) and shortname:
+        try:
+            defaults = get_model(shortname)
+        except MQError:
+            defaults = None
+
+    temperature = args.temperature if args.temperature is not None else (defaults or {}).get("temperature")
+    top_p = args.top_p if args.top_p is not None else (defaults or {}).get("top_p")
+    top_k = args.top_k if args.top_k is not None else (defaults or {}).get("top_k")
+
     if args.json:
         _print_err("warning: --json output does not include full conversation context (use `mq dump` for history)")
 
@@ -604,7 +668,16 @@ def _cmd_continue(args: argparse.Namespace) -> int:
     query = _apply_attachments_to_prompt(raw_query, args.attach)
     messages.append({"role": "user", "content": query})
 
-    result = chat(provider, model, messages, timeout_seconds=args.timeout_seconds, max_retries=args.retries)
+    result = chat(
+        provider,
+        model,
+        messages,
+        timeout_seconds=args.timeout_seconds,
+        max_retries=args.retries,
+        temperature=temperature,
+        top_p=top_p,
+        top_k=top_k,
+    )
     messages.append({"role": "assistant", "content": result.content})
     session["messages"] = messages
     save_session(session)
@@ -654,7 +727,16 @@ def _cmd_test(args: argparse.Namespace) -> int:
     query = _apply_attachments_to_prompt(raw_query, args.attach)
     messages.append({"role": "user", "content": query})
 
-    result = chat(args.provider, args.model, messages, timeout_seconds=args.timeout_seconds, max_retries=args.retries)
+    result = chat(
+        args.provider,
+        args.model,
+        messages,
+        timeout_seconds=args.timeout_seconds,
+        max_retries=args.retries,
+        temperature=args.temperature,
+        top_p=args.top_p,
+        top_k=args.top_k,
+    )
     _emit_result(
         response=result.content,
         reasoning=result.reasoning,
@@ -664,7 +746,15 @@ def _cmd_test(args: argparse.Namespace) -> int:
     )
 
     if args.save:
-        upsert_model(args.shortname, args.provider, args.model, sysprompt)
+        upsert_model(
+            args.save,
+            args.provider,
+            args.model,
+            sysprompt,
+            temperature=args.temperature,
+            top_p=args.top_p,
+            top_k=args.top_k,
+        )
     return 0
 
 
@@ -673,6 +763,9 @@ def _cmd_batch(args: argparse.Namespace) -> int:
     model_cfg = get_model(args.shortname)
     provider = model_cfg["provider"]
     model = model_cfg["model"]
+    temperature = args.temperature if args.temperature is not None else model_cfg.get("temperature")
+    top_p = args.top_p if args.top_p is not None else model_cfg.get("top_p")
+    top_k = args.top_k if args.top_k is not None else model_cfg.get("top_k")
     _assert_stdin_not_double_used(
         query=None,
         prompt_file=None,
@@ -733,7 +826,16 @@ def _cmd_batch(args: argparse.Namespace) -> int:
             out["sysprompt"] = sysprompt
 
         try:
-            result = chat(provider, model, messages, timeout_seconds=args.timeout_seconds, max_retries=args.retries)
+            result = chat(
+                provider,
+                model,
+                messages,
+                timeout_seconds=args.timeout_seconds,
+                max_retries=args.retries,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+            )
             out["response"] = result.content
             if result.reasoning and str(result.reasoning).strip():
                 out["reasoning"] = result.reasoning

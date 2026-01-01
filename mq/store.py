@@ -302,7 +302,16 @@ def save_config(config: dict[str, Any]) -> None:
     _write_json_atomic(config_path(), config)
 
 
-def upsert_model(shortname: str, provider: str, model: str, sysprompt: str | None) -> None:
+def upsert_model(
+    shortname: str,
+    provider: str,
+    model: str,
+    sysprompt: str | None,
+    *,
+    temperature: float | None = None,
+    top_p: float | None = None,
+    top_k: int | None = None,
+) -> None:
     if not shortname.strip():
         raise UserError("Shortname must be non-empty")
     if not provider.strip():
@@ -312,7 +321,14 @@ def upsert_model(shortname: str, provider: str, model: str, sysprompt: str | Non
 
     config = load_config()
     models = dict(config.get("models", {}))
-    models[shortname] = {"provider": provider, "model": model, "sysprompt": sysprompt}
+    entry: dict[str, Any] = {"provider": provider, "model": model, "sysprompt": sysprompt}
+    if temperature is not None:
+        entry["temperature"] = float(temperature)
+    if top_p is not None:
+        entry["top_p"] = float(top_p)
+    if top_k is not None:
+        entry["top_k"] = int(top_k)
+    models[shortname] = entry
     config["version"] = CONFIG_VERSION
     config["models"] = models
     save_config(config)
@@ -329,11 +345,29 @@ def get_model(shortname: str) -> dict[str, Any]:
     provider = entry.get("provider")
     model = entry.get("model")
     sysprompt = entry.get("sysprompt")
+    temperature = entry.get("temperature")
+    top_p = entry.get("top_p")
+    top_k = entry.get("top_k")
     if not isinstance(provider, str) or not isinstance(model, str):
         raise ConfigError(f"Invalid model entry for {shortname!r} (missing provider/model)")
     if sysprompt is not None and not isinstance(sysprompt, str):
         raise ConfigError(f"Invalid sysprompt for {shortname!r} (expected string)")
-    return {"provider": provider, "model": model, "sysprompt": sysprompt}
+
+    if temperature is not None and not isinstance(temperature, (int, float)):
+        raise ConfigError(f"Invalid temperature for {shortname!r} (expected number)")
+    if top_p is not None and not isinstance(top_p, (int, float)):
+        raise ConfigError(f"Invalid top_p for {shortname!r} (expected number)")
+    if top_k is not None and not isinstance(top_k, int):
+        raise ConfigError(f"Invalid top_k for {shortname!r} (expected int)")
+
+    return {
+        "provider": provider,
+        "model": model,
+        "sysprompt": sysprompt,
+        "temperature": float(temperature) if temperature is not None else None,
+        "top_p": float(top_p) if top_p is not None else None,
+        "top_k": int(top_k) if top_k is not None else None,
+    }
 
 
 def list_models() -> list[tuple[str, dict[str, Any]]]:

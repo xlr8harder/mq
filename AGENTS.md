@@ -3,6 +3,7 @@
 1. All code should have thorough test coverage.
 2. Typically, resolving an issue should have an associated commit.
 3. Tests should always be run before commit.
+4. Run a Claude review before finalizing (see below).
 4. We use `uv` for our python environment.
 5. Do not commit any original upstream datasets, though derived data can be tracked, if appropriate.
 6. If you change **any data synthesis behavior** (e.g. pair selection, JIC prompt, prompt templates, parsing), you must **regenerate a small sample of outputs and review them critically** before committing. Direct evaluation of generated artifacts is required for quality.
@@ -10,6 +11,16 @@
 We use `uv` to manage our python environment.  To run python use `uv run python`. Use `uv` for package management, and so on.
 
 We use the llm_client library to handle requests to ai model providers.  It is already installed in your uv environment.  API keys are in ~/.zshrc for now, which you can source.
+
+## Claude review (required before commit)
+
+- Run a Claude review before finalizing.
+- Use:
+  `claude --print "Please review this feature branch after checking <key documents like AGENTS.md>. <brief description of change...>"`
+- For follow-ups, continue the same session:
+  `claude -c "Thanks for the feedback... Please reevaluate and confirm."`
+- Allow several minutes for the review timeout.
+- Fix substantive issues and continue the existing review thread (use judgment on nits).
 
 ## Issue Tracking with bd (beads)
 

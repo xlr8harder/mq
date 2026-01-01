@@ -7,6 +7,8 @@
 - Add `mq new-session` alias for `mq query`.
 - Add `mq new` alias for `mq query`.
 - Print a `mq continue` tip after `mq query` (non-JSON output).
+- Add `--temperature`/`--top-p`/`--top-k` to query/continue/test/batch, with per-model defaults via `mq add`.
+- Change `mq test` to not require a shortname; use `--save <shortname>` to persist on success.
 
 ## 0.2.1 (2025-12-19)
 

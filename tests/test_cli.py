@@ -346,7 +346,7 @@ class MQCLITests(unittest.TestCase):
             with patch("mq.cli.chat", return_value=ChatResult(content="OK")):
                 out = io.StringIO()
                 with redirect_stdout(out):
-                    rc = cli.main(["test", "m", "--provider", "openai", "gpt-4o-mini", "--save", "hello"])
+                    rc = cli.main(["test", "--provider", "openai", "gpt-4o-mini", "--save", "m", "hello"])
             self.assertEqual(rc, 0)
             self.assertEqual(out.getvalue().strip(), "OK")
             entry = store.get_model("m")
@@ -358,7 +358,7 @@ class MQCLITests(unittest.TestCase):
             with patch("mq.cli.chat", return_value=ChatResult(content="OK")):
                 out = io.StringIO()
                 with redirect_stdout(out):
-                    rc = cli.main(["test", "m", "--provider", "openai", "gpt-4o-mini", "hello"])
+                    rc = cli.main(["test", "--provider", "openai", "gpt-4o-mini", "hello"])
             self.assertEqual(rc, 0)
             self.assertEqual(out.getvalue().strip(), "OK")
             with self.assertRaises(UserError):
@@ -820,6 +820,67 @@ class MQLLMControlsTests(unittest.TestCase):
                 rc = cli.main(["query", "m", "-n", "-t", "12", "-r", "0", "hi"])
             self.assertEqual(rc, 0)
             self.assertTrue(out.getvalue().strip().endswith("OK"))
+
+    def test_sampling_params_are_passed_through_to_chat(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+            store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
+
+            seen = {}
+
+            def fake_chat(_provider, _model_id, _messages, **kwargs):
+                seen["temperature"] = kwargs.get("temperature")
+                seen["top_p"] = kwargs.get("top_p")
+                seen["top_k"] = kwargs.get("top_k")
+                return ChatResult(content="OK")
+
+            out = io.StringIO()
+            with patch("mq.cli.chat", side_effect=fake_chat), redirect_stdout(out):
+                rc = cli.main(
+                    ["query", "m", "-n", "--temperature", "0.25", "--top-p", "0.9", "--top-k", "40", "hi"]
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(seen["temperature"], 0.25)
+            self.assertEqual(seen["top_p"], 0.9)
+            self.assertEqual(seen["top_k"], 40)
+
+    def test_add_saves_sampling_defaults_and_query_uses_them(self):
+        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+            rc = cli.main(
+                [
+                    "add",
+                    "m",
+                    "--provider",
+                    "openai",
+                    "gpt-4o-mini",
+                    "--temperature",
+                    "0.2",
+                    "--top-p",
+                    "0.8",
+                    "--top-k",
+                    "50",
+                ]
+            )
+            self.assertEqual(rc, 0)
+            cfg = store.get_model("m")
+            self.assertEqual(cfg["temperature"], 0.2)
+            self.assertEqual(cfg["top_p"], 0.8)
+            self.assertEqual(cfg["top_k"], 50)
+
+            seen = {}
+
+            def fake_chat(_provider, _model_id, _messages, **kwargs):
+                seen["temperature"] = kwargs.get("temperature")
+                seen["top_p"] = kwargs.get("top_p")
+                seen["top_k"] = kwargs.get("top_k")
+                return ChatResult(content="OK")
+
+            out = io.StringIO()
+            with patch("mq.cli.chat", side_effect=fake_chat), redirect_stdout(out):
+                rc2 = cli.main(["query", "m", "-n", "hi"])
+            self.assertEqual(rc2, 0)
+            self.assertEqual(seen["temperature"], 0.2)
+            self.assertEqual(seen["top_p"], 0.8)
+            self.assertEqual(seen["top_k"], 50)
 
     def test_query_dash_reads_from_stdin(self):
         with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
