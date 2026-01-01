@@ -65,6 +65,7 @@ Commands:
   mq ask <shortname> ...          (alias for `mq query`)
   mq q <shortname> ...            (short alias for `mq query`)
   mq new-session <shortname> ...  (alias for `mq query`)
+  mq new <shortname> ...          (alias for `mq query`)
     - Runs a one-off query against a configured model.
     - By default creates a new session and prints `session: <id>` first.
     - Use -n/--no-session for ephemeral asks (no session file, no pointer update).
@@ -380,7 +381,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     models = sub.add_parser("models", help="List configured models")
 
-    query = sub.add_parser("query", aliases=["ask", "q", "new-session"], help="Query a configured model")
+    query = sub.add_parser("query", aliases=["ask", "q", "new-session", "new"], help="Query a configured model")
     query.add_argument("shortname")
     query.add_argument("--sysprompt", "-s", help="Override system prompt for this run")
     query.add_argument("--sysprompt-file", help="Read system prompt from file ('-' for stdin)")
@@ -967,7 +968,7 @@ def main(argv: list[str] | None = None) -> int:
                 return _cmd_add(args)
             case "models":
                 return _cmd_models(args)
-            case "query" | "ask" | "q" | "new-session":
+            case "query" | "ask" | "q" | "new-session" | "new":
                 return _cmd_query(args)
             case "continue" | "cont" | "c":
                 return _cmd_continue(args)
