@@ -150,7 +150,9 @@ def chat(
         if raw_response:
             error_info["raw_response_snippet"] = _truncate(str(raw_response))
         if raw_provider_response is not None:
-            error_info["raw_provider_response_snippet"] = _json_snippet(raw_provider_response)
+            error_info["raw_provider_response_snippet"] = _json_snippet(
+                raw_provider_response
+            )
 
         raise LLMError(message, error_info=error_info)
     standardized = response.standardized_response or {}
@@ -162,7 +164,9 @@ def chat(
                 "provider": provider_name,
                 "model": model_id,
                 "standardized_response_snippet": _json_snippet(standardized),
-                "raw_provider_response_snippet": _json_snippet(response.raw_provider_response),
+                "raw_provider_response_snippet": _json_snippet(
+                    response.raw_provider_response
+                ),
             },
         )
     reasoning = _extract_reasoning(response.raw_provider_response)

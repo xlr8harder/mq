@@ -18,7 +18,10 @@ from mq import llm as mq_llm
 
 class MQCLITests(unittest.TestCase):
     def test_dump_errors_without_conversation(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             out = io.StringIO()
             err = io.StringIO()
             with redirect_stdout(out), redirect_stderr(err):
@@ -27,7 +30,10 @@ class MQCLITests(unittest.TestCase):
             self.assertIn("No previous conversation found", err.getvalue())
 
     def test_add_and_models(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             out = io.StringIO()
             err = io.StringIO()
             with redirect_stdout(out), redirect_stderr(err):
@@ -42,10 +48,23 @@ class MQCLITests(unittest.TestCase):
             self.assertIn("gpt\topenai\tgpt-4o-mini", out.getvalue().strip())
 
     def test_global_config_override_uses_alternate_model_registry_path(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             alt_config = Path(td) / "alt-config.json"
 
-            rc = cli.main(["--config", str(alt_config), "add", "m", "--provider", "openai", "gpt-4o-mini"])
+            rc = cli.main(
+                [
+                    "--config",
+                    str(alt_config),
+                    "add",
+                    "m",
+                    "--provider",
+                    "openai",
+                    "gpt-4o-mini",
+                ]
+            )
             self.assertEqual(rc, 0)
             self.assertTrue(alt_config.exists())
 
@@ -55,35 +74,70 @@ class MQCLITests(unittest.TestCase):
             with patch("mq.cli.chat", return_value=ChatResult(content="A1")):
                 out = io.StringIO()
                 with redirect_stdout(out):
-                    rc = cli.main(["--config", str(alt_config), "query", "m", "-n", "Q1"])
+                    rc = cli.main(
+                        ["--config", str(alt_config), "query", "m", "-n", "Q1"]
+                    )
             self.assertEqual(rc, 0)
             self.assertTrue(out.getvalue().strip().endswith("A1"))
 
     def test_global_config_override_can_appear_after_subcommand(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             alt_config = Path(td) / "alt-config.json"
-            rc = cli.main(["add", "m", "--provider", "openai", "gpt-4o-mini", "--config", str(alt_config)])
+            rc = cli.main(
+                [
+                    "add",
+                    "m",
+                    "--provider",
+                    "openai",
+                    "gpt-4o-mini",
+                    "--config",
+                    str(alt_config),
+                ]
+            )
             self.assertEqual(rc, 0)
             self.assertTrue(alt_config.exists())
 
     def test_global_config_override_can_use_equals_form(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             alt_config = Path(td) / "alt-config.json"
-            rc = cli.main(["add", "m", "--provider", "openai", "gpt-4o-mini", f"--config={alt_config}"])
+            rc = cli.main(
+                [
+                    "add",
+                    "m",
+                    "--provider",
+                    "openai",
+                    "gpt-4o-mini",
+                    f"--config={alt_config}",
+                ]
+            )
             self.assertEqual(rc, 0)
             self.assertTrue(alt_config.exists())
 
     def test_add_overwrites_existing_entry(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt="S1")
-            store.upsert_model("m", "openrouter", "anthropic/claude-3.5-sonnet", sysprompt="S2")
+            store.upsert_model(
+                "m", "openrouter", "anthropic/claude-3.5-sonnet", sysprompt="S2"
+            )
             entry = store.get_model("m")
             self.assertEqual(entry["provider"], "openrouter")
             self.assertEqual(entry["model"], "anthropic/claude-3.5-sonnet")
             self.assertEqual(entry["sysprompt"], "S2")
 
     def test_add_sysprompt_file(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             prompt_path = Path(td) / "prompt.txt"
             prompt_path.write_text("HELLO\n", encoding="utf-8")
             rc = cli.main(
@@ -102,7 +156,10 @@ class MQCLITests(unittest.TestCase):
             self.assertEqual(entry["sysprompt"], "HELLO")
 
     def test_add_sysprompt_and_file_conflict_errors(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             prompt_path = Path(td) / "prompt.txt"
             prompt_path.write_text("HELLO\n", encoding="utf-8")
             err = io.StringIO()
@@ -124,7 +181,10 @@ class MQCLITests(unittest.TestCase):
             self.assertIn("--sysprompt", err.getvalue())
 
     def test_query_creates_new_sessions_and_updates_latest(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
 
             with patch("mq.cli.chat", return_value=ChatResult(content="A1")):
@@ -140,7 +200,9 @@ class MQCLITests(unittest.TestCase):
             self.assertEqual(len(sessions), 1)
             latest = store.load_latest_session()
             self.assertEqual(latest["model_shortname"], "m")
-            self.assertEqual([m["role"] for m in latest["messages"]], ["user", "assistant"])
+            self.assertEqual(
+                [m["role"] for m in latest["messages"]], ["user", "assistant"]
+            )
             self.assertEqual([m["content"] for m in latest["messages"]], ["Q1", "A1"])
 
             with patch("mq.cli.chat", return_value=ChatResult(content="A2")):
@@ -156,7 +218,10 @@ class MQCLITests(unittest.TestCase):
             self.assertEqual(len(sessions2), 2)
 
     def test_new_session_alias_behaves_like_query(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
             with patch("mq.cli.chat", return_value=ChatResult(content="A1")):
                 out = io.StringIO()
@@ -171,7 +236,10 @@ class MQCLITests(unittest.TestCase):
             self.assertEqual([m["content"] for m in latest2["messages"]], ["Q1", "A1"])
 
     def test_new_alias_behaves_like_query(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
             with patch("mq.cli.chat", return_value=ChatResult(content="A1")):
                 out = io.StringIO()
@@ -182,7 +250,10 @@ class MQCLITests(unittest.TestCase):
             self.assertIn("mq continue", out.getvalue())
 
     def test_continue_appends_and_short_aliases(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
 
             with patch("mq.cli.chat", return_value=ChatResult(content="A1")):
@@ -215,11 +286,17 @@ class MQCLITests(unittest.TestCase):
                 self.assertTrue(out.getvalue().strip().endswith("A3"))
 
             latest = store.load_latest_session()
-            self.assertEqual([m["content"] for m in latest["messages"]], ["Q1", "A1", "Q2", "A2", "Q3", "A3"])
+            self.assertEqual(
+                [m["content"] for m in latest["messages"]],
+                ["Q1", "A1", "Q2", "A2", "Q3", "A3"],
+            )
             self.assertEqual(len(store.list_sessions()), 1)
 
     def test_sysprompt_override_persists_to_continue(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt="SAVED")
 
             with patch("mq.cli.chat", return_value=ChatResult(content="A1")):
@@ -246,10 +323,15 @@ class MQCLITests(unittest.TestCase):
 
             session2 = store.load_latest_session()
             self.assertEqual(session2["sysprompt"], "OVERRIDE")
-            self.assertEqual([m["role"] for m in session2["messages"]][-2:], ["user", "assistant"])
+            self.assertEqual(
+                [m["role"] for m in session2["messages"]][-2:], ["user", "assistant"]
+            )
 
     def test_query_sysprompt_file_overrides_saved_sysprompt(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt="SAVED")
             prompt_path = Path(td) / "sys.txt"
             prompt_path.write_text("FILE\n", encoding="utf-8")
@@ -262,13 +344,18 @@ class MQCLITests(unittest.TestCase):
             with patch("mq.cli.chat", side_effect=fake_chat):
                 out = io.StringIO()
                 with redirect_stdout(out):
-                    rc = cli.main(["query", "m", "--sysprompt-file", str(prompt_path), "Q1"])
+                    rc = cli.main(
+                        ["query", "m", "--sysprompt-file", str(prompt_path), "Q1"]
+                    )
             self.assertEqual(rc, 0)
             session = store.load_latest_session()
             self.assertEqual(session["sysprompt"], "FILE")
 
     def test_query_prompt_file_reads_prompt_text(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
             prompt_path = Path(td) / "prompt.txt"
             prompt_path.write_text("FROMFILE\n", encoding="utf-8")
@@ -286,7 +373,10 @@ class MQCLITests(unittest.TestCase):
             self.assertTrue(out.getvalue().strip().endswith("A1"))
 
     def test_query_prompt_file_and_query_conflict_errors(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
             prompt_path = Path(td) / "prompt.txt"
             prompt_path.write_text("FROMFILE\n", encoding="utf-8")
@@ -297,17 +387,25 @@ class MQCLITests(unittest.TestCase):
             self.assertIn("--prompt-file", err.getvalue())
 
     def test_query_prompt_file_stdin_conflict_errors(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
             err = io.StringIO()
             stdin = io.StringIO("PROMPT\n")
             with patch("sys.stdin", stdin), redirect_stderr(err):
-                rc = cli.main(["query", "m", "--prompt-file", "-", "--sysprompt-file", "-", "Q1"])
+                rc = cli.main(
+                    ["query", "m", "--prompt-file", "-", "--sysprompt-file", "-", "Q1"]
+                )
             self.assertEqual(rc, 2)
             self.assertIn("stdin can only be consumed once", err.getvalue())
 
     def test_query_sysprompt_file_stdin_conflict_errors(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
             err = io.StringIO()
             stdin = io.StringIO("SYS\nPROMPT\n")
@@ -318,7 +416,10 @@ class MQCLITests(unittest.TestCase):
             self.assertIn("stdin can only be consumed once", err.getvalue())
 
     def test_dump_outputs_json(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
             with patch("mq.cli.chat", return_value=ChatResult(content="A1")):
                 out = io.StringIO()
@@ -334,7 +435,10 @@ class MQCLITests(unittest.TestCase):
             self.assertIn("id", data)
 
     def test_rm_removes_shortname(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
             rc = cli.main(["rm", "m"])
             self.assertEqual(rc, 0)
@@ -342,11 +446,24 @@ class MQCLITests(unittest.TestCase):
                 store.get_model("m")
 
     def test_test_command_runs_query_and_saves_on_success(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             with patch("mq.cli.chat", return_value=ChatResult(content="OK")):
                 out = io.StringIO()
                 with redirect_stdout(out):
-                    rc = cli.main(["test", "--provider", "openai", "gpt-4o-mini", "--save", "m", "hello"])
+                    rc = cli.main(
+                        [
+                            "test",
+                            "--provider",
+                            "openai",
+                            "gpt-4o-mini",
+                            "--save",
+                            "m",
+                            "hello",
+                        ]
+                    )
             self.assertEqual(rc, 0)
             self.assertEqual(out.getvalue().strip(), "OK")
             entry = store.get_model("m")
@@ -354,18 +471,26 @@ class MQCLITests(unittest.TestCase):
             self.assertEqual(entry["model"], "gpt-4o-mini")
 
     def test_test_command_does_not_save_by_default(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             with patch("mq.cli.chat", return_value=ChatResult(content="OK")):
                 out = io.StringIO()
                 with redirect_stdout(out):
-                    rc = cli.main(["test", "--provider", "openai", "gpt-4o-mini", "hello"])
+                    rc = cli.main(
+                        ["test", "--provider", "openai", "gpt-4o-mini", "hello"]
+                    )
             self.assertEqual(rc, 0)
             self.assertEqual(out.getvalue().strip(), "OK")
             with self.assertRaises(UserError):
                 store.get_model("m")
 
     def test_llm_errors_print_diagnostics(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "chutes", "some/model", sysprompt=None)
 
             def boom(*_args, **_kwargs):
@@ -376,7 +501,7 @@ class MQCLITests(unittest.TestCase):
                         "model": "some/model",
                         "type": "api_error",
                         "status_code": 401,
-                        "raw_response_snippet": "{\"error\":{\"message\":\"bad key\"}}",
+                        "raw_response_snippet": '{"error":{"message":"bad key"}}',
                     },
                 )
 
@@ -389,12 +514,18 @@ class MQCLITests(unittest.TestCase):
             self.assertIn("bad key", err.getvalue())
 
     def test_reasoning_traces_are_printed_to_stderr(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
             out = io.StringIO()
             err = io.StringIO()
             with (
-                patch("mq.cli.chat", return_value=ChatResult(content="A1", reasoning="trace")),
+                patch(
+                    "mq.cli.chat",
+                    return_value=ChatResult(content="A1", reasoning="trace"),
+                ),
                 redirect_stdout(out),
                 redirect_stderr(err),
             ):
@@ -409,37 +540,76 @@ class MQCLITests(unittest.TestCase):
             self.assertEqual(err.getvalue(), "")
 
     def test_json_output_without_reasoning(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
             out = io.StringIO()
-            with patch("mq.cli.chat", return_value=ChatResult(content="A1")), redirect_stdout(out):
+            with (
+                patch("mq.cli.chat", return_value=ChatResult(content="A1")),
+                redirect_stdout(out),
+            ):
                 rc = cli.main(["query", "m", "--json", "--session", "s1", "Q1"])
             self.assertEqual(rc, 0)
             payload = json.loads(out.getvalue().strip())
-            self.assertEqual(payload, {"response": "A1", "prompt": "Q1", "session": "s1"})
+            self.assertEqual(
+                payload, {"response": "A1", "prompt": "Q1", "session": "s1"}
+            )
 
     def test_json_output_with_reasoning(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
             out = io.StringIO()
-            with patch("mq.cli.chat", return_value=ChatResult(content="A1", reasoning="trace")), redirect_stdout(out):
+            with (
+                patch(
+                    "mq.cli.chat",
+                    return_value=ChatResult(content="A1", reasoning="trace"),
+                ),
+                redirect_stdout(out),
+            ):
                 rc = cli.main(["query", "m", "--json", "--session", "s1", "Q1"])
             self.assertEqual(rc, 0)
             payload = json.loads(out.getvalue().strip())
-            self.assertEqual(payload, {"response": "A1", "prompt": "Q1", "session": "s1", "reasoning": "trace"})
+            self.assertEqual(
+                payload,
+                {
+                    "response": "A1",
+                    "prompt": "Q1",
+                    "session": "s1",
+                    "reasoning": "trace",
+                },
+            )
 
     def test_json_output_includes_sysprompt_when_set(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
             out = io.StringIO()
-            with patch("mq.cli.chat", return_value=ChatResult(content="A1")), redirect_stdout(out):
-                rc = cli.main(["query", "m", "--json", "--session", "s1", "-s", "S", "Q1"])
+            with (
+                patch("mq.cli.chat", return_value=ChatResult(content="A1")),
+                redirect_stdout(out),
+            ):
+                rc = cli.main(
+                    ["query", "m", "--json", "--session", "s1", "-s", "S", "Q1"]
+                )
             self.assertEqual(rc, 0)
             payload = json.loads(out.getvalue().strip())
-            self.assertEqual(payload, {"response": "A1", "prompt": "Q1", "session": "s1", "sysprompt": "S"})
+            self.assertEqual(
+                payload,
+                {"response": "A1", "prompt": "Q1", "session": "s1", "sysprompt": "S"},
+            )
 
     def test_continue_json_warns_context_not_included(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
             with patch("mq.cli.chat", return_value=ChatResult(content="A1")):
                 out0 = io.StringIO()
@@ -457,10 +627,15 @@ class MQCLITests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertIn("does not include full conversation context", err.getvalue())
             payload = json.loads(out.getvalue().strip())
-            self.assertEqual(payload, {"response": "A2", "prompt": "Q2", "session": "s1"})
+            self.assertEqual(
+                payload, {"response": "A2", "prompt": "Q2", "session": "s1"}
+            )
 
     def test_session_list_and_select_and_continue_session(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
             with patch("mq.cli.chat", return_value=ChatResult(content="A1")):
                 out1 = io.StringIO()
@@ -504,7 +679,10 @@ class MQCLITests(unittest.TestCase):
             self.assertEqual([m["content"] for m in s2["messages"]][-2:], ["Q3", "A3"])
 
     def test_query_no_session_does_not_create_or_update_latest(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
             with patch("mq.cli.chat", return_value=ChatResult(content="A1")):
                 out1 = io.StringIO()
@@ -525,9 +703,15 @@ class MQCLITests(unittest.TestCase):
             self.assertEqual(store.load_last_conversation().get("id"), sid1)
 
     def test_query_aliases_work(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
-            with patch("mq.cli.chat", side_effect=[ChatResult(content="A1"), ChatResult(content="A2")]):
+            with patch(
+                "mq.cli.chat",
+                side_effect=[ChatResult(content="A1"), ChatResult(content="A2")],
+            ):
                 out = io.StringIO()
                 with redirect_stdout(out):
                     rc = cli.main(["ask", "m", "Q1"])
@@ -572,7 +756,10 @@ class MQCLITests(unittest.TestCase):
         self.assertIn("usage:", out.getvalue())
 
     def test_batch_merges_rows_and_extracts_tags_and_does_not_create_sessions(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
             in_path = Path(td) / "in.jsonl"
             out_path = Path(td) / "out.jsonl"
@@ -625,7 +812,11 @@ class MQCLITests(unittest.TestCase):
             self.assertEqual(seen, {1, 2})
             self.assertEqual(store.list_sessions(), [])
 
-            lines = [l for l in out_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+            lines = [
+                l
+                for l in out_path.read_text(encoding="utf-8").splitlines()
+                if l.strip()
+            ]
             self.assertEqual(len(lines), 2)
             rows = [json.loads(l) for l in lines]
             by_id = {r["id"]: r for r in rows}
@@ -637,11 +828,17 @@ class MQCLITests(unittest.TestCase):
             self.assertEqual(by_id[2]["tag:field"], "two")
 
     def test_batch_merge_conflict_is_fatal(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
             in_path = Path(td) / "in.jsonl"
             out_path = Path(td) / "out.jsonl"
-            in_path.write_text(json.dumps({"prompt": "P1", "response": "already"}) + "\n", encoding="utf-8")
+            in_path.write_text(
+                json.dumps({"prompt": "P1", "response": "already"}) + "\n",
+                encoding="utf-8",
+            )
             err = io.StringIO()
             with redirect_stderr(err):
                 rc = cli.main(["batch", "m", "-i", str(in_path), "-o", str(out_path)])
@@ -651,7 +848,10 @@ class MQCLITests(unittest.TestCase):
                 self.assertEqual(out_path.read_text(encoding="utf-8"), "")
 
     def test_batch_output_is_completion_order_unordered(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
             in_path = Path(td) / "in.jsonl"
             out_path = Path(td) / "out.jsonl"
@@ -694,17 +894,26 @@ class MQCLITests(unittest.TestCase):
                     ]
                 )
             self.assertEqual(rc, 0)
-            lines = [l for l in out_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+            lines = [
+                l
+                for l in out_path.read_text(encoding="utf-8").splitlines()
+                if l.strip()
+            ]
             self.assertEqual(len(lines), 2)
             first = json.loads(lines[0])
             self.assertEqual(first["id"], 2)
 
     def test_batch_timeout_and_retries_defaults_and_overrides(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
             in_path = Path(td) / "in.jsonl"
             out_path = Path(td) / "out.jsonl"
-            in_path.write_text(json.dumps({"id": 1, "prompt": "P"}) + "\n", encoding="utf-8")
+            in_path.write_text(
+                json.dumps({"id": 1, "prompt": "P"}) + "\n", encoding="utf-8"
+            )
 
             seen = {}
 
@@ -714,41 +923,98 @@ class MQCLITests(unittest.TestCase):
                 return ChatResult(content="R")
 
             with patch("mq.cli.chat", side_effect=fake_chat):
-                rc = cli.main(["batch", "m", "-i", str(in_path), "-o", str(out_path), "--progress-seconds", "0"])
+                rc = cli.main(
+                    [
+                        "batch",
+                        "m",
+                        "-i",
+                        str(in_path),
+                        "-o",
+                        str(out_path),
+                        "--progress-seconds",
+                        "0",
+                    ]
+                )
             self.assertEqual(rc, 0)
             self.assertEqual(seen["timeout_seconds"], 600)
             self.assertEqual(seen["max_retries"], 5)
 
-            in_path.write_text(json.dumps({"id": 1, "prompt": "P"}) + "\n", encoding="utf-8")
+            in_path.write_text(
+                json.dumps({"id": 1, "prompt": "P"}) + "\n", encoding="utf-8"
+            )
             seen = {}
             with patch("mq.cli.chat", side_effect=fake_chat):
                 rc = cli.main(
-                    ["batch", "m", "-i", str(in_path), "-o", str(out_path), "-t", "12", "-r", "0", "--progress-seconds", "0"]
+                    [
+                        "batch",
+                        "m",
+                        "-i",
+                        str(in_path),
+                        "-o",
+                        str(out_path),
+                        "-t",
+                        "12",
+                        "-r",
+                        "0",
+                        "--progress-seconds",
+                        "0",
+                    ]
                 )
             self.assertEqual(rc, 0)
             self.assertEqual(seen["timeout_seconds"], 12)
             self.assertEqual(seen["max_retries"], 0)
 
     def test_batch_progress_reporting_writes_to_stderr(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
             in_path = Path(td) / "in.jsonl"
             out_path = Path(td) / "out.jsonl"
-            in_path.write_text(json.dumps({"id": 1, "prompt": "P"}) + "\n", encoding="utf-8")
+            in_path.write_text(
+                json.dumps({"id": 1, "prompt": "P"}) + "\n", encoding="utf-8"
+            )
 
             def fake_chat(_provider, _model_id, _messages, **_kwargs):
                 return ChatResult(content="R")
 
             out = io.StringIO()
             err = io.StringIO()
-            with patch("mq.cli.chat", side_effect=fake_chat), redirect_stdout(out), redirect_stderr(err):
-                rc = cli.main(["batch", "m", "-i", str(in_path), "-o", str(out_path), "--progress-seconds", "0"])
+            with (
+                patch("mq.cli.chat", side_effect=fake_chat),
+                redirect_stdout(out),
+                redirect_stderr(err),
+            ):
+                rc = cli.main(
+                    [
+                        "batch",
+                        "m",
+                        "-i",
+                        str(in_path),
+                        "-o",
+                        str(out_path),
+                        "--progress-seconds",
+                        "0",
+                    ]
+                )
             self.assertEqual(rc, 0)
             self.assertEqual(err.getvalue(), "")
 
             err2 = io.StringIO()
             with patch("mq.cli.chat", side_effect=fake_chat), redirect_stderr(err2):
-                rc = cli.main(["batch", "m", "-i", str(in_path), "-o", str(out_path), "--progress-seconds", "1"])
+                rc = cli.main(
+                    [
+                        "batch",
+                        "m",
+                        "-i",
+                        str(in_path),
+                        "-o",
+                        str(out_path),
+                        "--progress-seconds",
+                        "1",
+                    ]
+                )
             self.assertEqual(rc, 0)
             self.assertIn("batch done:", err2.getvalue())
 
@@ -771,8 +1037,13 @@ class MQLLMControlsTests(unittest.TestCase):
             calls["max_retries"] = options.get("max_retries")
             return FakeResp()
 
-        with patch("mq.llm.get_provider", side_effect=fake_get_provider), patch("mq.llm.retry_request", side_effect=fake_retry_request):
-            res = mq_llm.chat("openai", "gpt-4o-mini", [{"role": "user", "content": "hi"}])
+        with (
+            patch("mq.llm.get_provider", side_effect=fake_get_provider),
+            patch("mq.llm.retry_request", side_effect=fake_retry_request),
+        ):
+            res = mq_llm.chat(
+                "openai", "gpt-4o-mini", [{"role": "user", "content": "hi"}]
+            )
         self.assertEqual(res.content, "ok")
         self.assertEqual(calls["timeout"], mq_llm.DEFAULT_TIMEOUT_SECONDS)
         self.assertEqual(calls["max_retries"], mq_llm.DEFAULT_MAX_RETRIES)
@@ -794,7 +1065,10 @@ class MQLLMControlsTests(unittest.TestCase):
             calls["max_retries"] = options.get("max_retries")
             return FakeResp()
 
-        with patch("mq.llm.get_provider", side_effect=fake_get_provider), patch("mq.llm.retry_request", side_effect=fake_retry_request):
+        with (
+            patch("mq.llm.get_provider", side_effect=fake_get_provider),
+            patch("mq.llm.retry_request", side_effect=fake_retry_request),
+        ):
             res = mq_llm.chat(
                 "openai",
                 "gpt-4o-mini",
@@ -807,7 +1081,10 @@ class MQLLMControlsTests(unittest.TestCase):
         self.assertEqual(calls["max_retries"], 0)
 
     def test_cli_short_flags_pass_timeout_and_retries(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
 
             def fake_chat(provider, model_id, messages, **kwargs):
@@ -822,7 +1099,10 @@ class MQLLMControlsTests(unittest.TestCase):
             self.assertTrue(out.getvalue().strip().endswith("OK"))
 
     def test_sampling_params_are_passed_through_to_chat(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
 
             seen = {}
@@ -836,7 +1116,18 @@ class MQLLMControlsTests(unittest.TestCase):
             out = io.StringIO()
             with patch("mq.cli.chat", side_effect=fake_chat), redirect_stdout(out):
                 rc = cli.main(
-                    ["query", "m", "-n", "--temperature", "0.25", "--top-p", "0.9", "--top-k", "40", "hi"]
+                    [
+                        "query",
+                        "m",
+                        "-n",
+                        "--temperature",
+                        "0.25",
+                        "--top-p",
+                        "0.9",
+                        "--top-k",
+                        "40",
+                        "hi",
+                    ]
                 )
             self.assertEqual(rc, 0)
             self.assertEqual(seen["temperature"], 0.25)
@@ -844,7 +1135,10 @@ class MQLLMControlsTests(unittest.TestCase):
             self.assertEqual(seen["top_k"], 40)
 
     def test_add_saves_sampling_defaults_and_query_uses_them(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             rc = cli.main(
                 [
                     "add",
@@ -883,7 +1177,10 @@ class MQLLMControlsTests(unittest.TestCase):
             self.assertEqual(seen["top_k"], 50)
 
     def test_query_dash_reads_from_stdin(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
 
             def fake_chat(provider, model_id, messages, **_kwargs):
@@ -893,13 +1190,20 @@ class MQLLMControlsTests(unittest.TestCase):
 
             out = io.StringIO()
             stdin = io.StringIO("FROM STDIN\n")
-            with patch("mq.cli.chat", side_effect=fake_chat), patch("sys.stdin", stdin), redirect_stdout(out):
+            with (
+                patch("mq.cli.chat", side_effect=fake_chat),
+                patch("sys.stdin", stdin),
+                redirect_stdout(out),
+            ):
                 rc = cli.main(["query", "m", "-n", "-"])
             self.assertEqual(rc, 0)
             self.assertTrue(out.getvalue().strip().endswith("OK"))
 
     def test_attach_file_appends_to_prompt(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
             attach_path = Path(td) / "a.txt"
             attach_path.write_text("ATTACH\n", encoding="utf-8")
@@ -918,7 +1222,10 @@ class MQLLMControlsTests(unittest.TestCase):
             self.assertEqual(rc, 0)
 
     def test_attach_dash_reads_from_stdin(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
 
             def fake_chat(provider, model_id, messages, **_kwargs):
@@ -930,12 +1237,19 @@ class MQLLMControlsTests(unittest.TestCase):
 
             out = io.StringIO()
             stdin = io.StringIO("ATTACH\n")
-            with patch("mq.cli.chat", side_effect=fake_chat), patch("sys.stdin", stdin), redirect_stdout(out):
+            with (
+                patch("mq.cli.chat", side_effect=fake_chat),
+                patch("sys.stdin", stdin),
+                redirect_stdout(out),
+            ):
                 rc = cli.main(["query", "m", "-n", "--attach", "-", "Q"])
             self.assertEqual(rc, 0)
 
     def test_session_rename_updates_latest_pointer(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
             with patch("mq.cli.chat", return_value=ChatResult(content="A1")):
                 out1 = io.StringIO()
@@ -949,7 +1263,10 @@ class MQLLMControlsTests(unittest.TestCase):
             self.assertTrue(store.session_path("new").exists())
 
     def test_session_list_long_prompt_shows_head_and_tail(self):
-        with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {"MQ_HOME": td}, clear=False):
+        with (
+            tempfile.TemporaryDirectory() as td,
+            patch.dict(os.environ, {"MQ_HOME": td}, clear=False),
+        ):
             store.upsert_model("m", "openai", "gpt-4o-mini", sysprompt=None)
             long_q = "Hello, I'd like " + ("x" * 300) + " do you understand?"
             with patch("mq.cli.chat", return_value=ChatResult(content="A1")):

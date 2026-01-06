@@ -132,6 +132,7 @@ _TAG_RE = re.compile(r"<([A-Za-z0-9_.:-]+)>(.*?)</\1>", re.DOTALL)
 def _print_err(message: str) -> None:
     print(message, file=sys.stderr)
 
+
 def _print_llm_error(error: LLMError) -> None:
     info = error.error_info or {}
     provider = info.get("provider")
@@ -155,9 +156,12 @@ def _print_llm_error(error: LLMError) -> None:
 
     _print_err(f"{prefix}: {error}")
 
-    snippet = info.get("raw_response_snippet") or info.get("raw_provider_response_snippet")
+    snippet = info.get("raw_response_snippet") or info.get(
+        "raw_provider_response_snippet"
+    )
     if snippet:
         _print_err(f"raw: {snippet}")
+
 
 def _emit_result(
     *,
@@ -194,6 +198,7 @@ def _emit_result(
         print("response:")
     print(response)
 
+
 def _read_sysprompt_file(path: str) -> str:
     try:
         if path == "-":
@@ -203,7 +208,9 @@ def _read_sysprompt_file(path: str) -> str:
         raise UserError(f"Failed to read sysprompt file {path!r}: {e}") from e
 
 
-def _resolve_sysprompt(*, sysprompt: str | None, sysprompt_file: str | None) -> str | None:
+def _resolve_sysprompt(
+    *, sysprompt: str | None, sysprompt_file: str | None
+) -> str | None:
     if sysprompt and sysprompt_file:
         raise MQError("Use only one of --sysprompt or --sysprompt-file")
     if sysprompt_file:
@@ -276,7 +283,9 @@ def _format_attachment(name: str, content: str) -> str:
     return f"--- BEGIN ATTACHMENT: {name} ---\n{content.rstrip()}\n--- END ATTACHMENT: {name} ---"
 
 
-def _apply_attachments_to_prompt(prompt: str, attach_paths: Iterable[str] | None) -> str:
+def _apply_attachments_to_prompt(
+    prompt: str, attach_paths: Iterable[str] | None
+) -> str:
     paths = [p for p in (attach_paths or []) if p is not None]
     if not paths:
         return prompt
@@ -284,13 +293,16 @@ def _apply_attachments_to_prompt(prompt: str, attach_paths: Iterable[str] | None
     if stdin_count > 1:
         raise UserError("Only one --attach '-' is allowed")
     if prompt == "-" and stdin_count:
-        raise UserError("Cannot use '-' for both query and --attach (stdin can only be consumed once)")
+        raise UserError(
+            "Cannot use '-' for both query and --attach (stdin can only be consumed once)"
+        )
 
     blocks: list[str] = []
     for path in paths:
         name, content = _read_attach(path)
         blocks.append(_format_attachment(name, content))
     return (prompt.rstrip() + "\n\n" + "\n\n".join(blocks)).rstrip()
+
 
 def _apply_prompt_prefix(prompt: str, prefix: str | None) -> str:
     if prefix is None or not str(prefix).strip():
@@ -333,6 +345,7 @@ def _open_text(path: str, mode: str):
     if path == "-":
         return sys.stdin if "r" in mode else sys.stdout
     return Path(path).expanduser().open(mode, encoding="utf-8")
+
 
 def _format_duration(seconds: float) -> str:
     seconds = max(0.0, float(seconds))
@@ -386,46 +399,131 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     help_cmd = sub.add_parser("help", help="Show detailed help")
-    help_cmd.add_argument("topic", nargs=argparse.REMAINDER, help="Optional command path to show help for")
+    help_cmd.add_argument(
+        "topic", nargs=argparse.REMAINDER, help="Optional command path to show help for"
+    )
 
     add = sub.add_parser("add", help="Add/update a model shortname")
     add.add_argument("shortname")
     add.add_argument("--provider", required=True, help="Provider name (llm_client)")
     add.add_argument("model", help="Full model identifier")
     add.add_argument("--sysprompt", help="Saved system prompt for this model")
-    add.add_argument("--sysprompt-file", help="Read saved system prompt from file ('-' for stdin)")
-    add.add_argument("--temperature", type=_non_negative_float, help="Default sampling temperature (saved in config)")
-    add.add_argument("--top-p", dest="top_p", type=_unit_float, help="Default sampling top_p (saved in config)")
-    add.add_argument("--top-k", dest="top_k", type=_non_negative_int, help="Default sampling top_k (saved in config)")
+    add.add_argument(
+        "--sysprompt-file", help="Read saved system prompt from file ('-' for stdin)"
+    )
+    add.add_argument(
+        "--temperature",
+        type=_non_negative_float,
+        help="Default sampling temperature (saved in config)",
+    )
+    add.add_argument(
+        "--top-p",
+        dest="top_p",
+        type=_unit_float,
+        help="Default sampling top_p (saved in config)",
+    )
+    add.add_argument(
+        "--top-k",
+        dest="top_k",
+        type=_non_negative_int,
+        help="Default sampling top_k (saved in config)",
+    )
 
     models = sub.add_parser("models", help="List configured models")
 
-    query = sub.add_parser("query", aliases=["ask", "q", "new-session", "new"], help="Query a configured model")
+    query = sub.add_parser(
+        "query",
+        aliases=["ask", "q", "new-session", "new"],
+        help="Query a configured model",
+    )
     query.add_argument("shortname")
     query.add_argument("--sysprompt", "-s", help="Override system prompt for this run")
-    query.add_argument("--sysprompt-file", help="Read system prompt from file ('-' for stdin)")
-    query.add_argument("--json", action="store_true", help="Emit a single-line JSON object")
-    query.add_argument("-n", "--no-session", action="store_true", help="Do not create or update a session")
-    query.add_argument("--session", help="Create a new named session id (collision = error)")
-    query.add_argument("--attach", action="append", help="Append file content to the prompt ('-' for stdin)", default=[])
-    query.add_argument("--prompt-file", help="Read prompt text from file ('-' for stdin)")
-    query.add_argument("--temperature", type=_non_negative_float, help="Sampling temperature override")
-    query.add_argument("--top-p", dest="top_p", type=_unit_float, help="Sampling top_p override")
-    query.add_argument("--top-k", dest="top_k", type=_non_negative_int, help="Sampling top_k override")
-    query.add_argument("-t", "--timeout-seconds", type=_positive_int, help="Request timeout in seconds (default: 600)")
-    query.add_argument("-r", "--retries", type=_non_negative_int, help="Max retries for retryable errors (default: 3)")
+    query.add_argument(
+        "--sysprompt-file", help="Read system prompt from file ('-' for stdin)"
+    )
+    query.add_argument(
+        "--json", action="store_true", help="Emit a single-line JSON object"
+    )
+    query.add_argument(
+        "-n",
+        "--no-session",
+        action="store_true",
+        help="Do not create or update a session",
+    )
+    query.add_argument(
+        "--session", help="Create a new named session id (collision = error)"
+    )
+    query.add_argument(
+        "--attach",
+        action="append",
+        help="Append file content to the prompt ('-' for stdin)",
+        default=[],
+    )
+    query.add_argument(
+        "--prompt-file", help="Read prompt text from file ('-' for stdin)"
+    )
+    query.add_argument(
+        "--temperature", type=_non_negative_float, help="Sampling temperature override"
+    )
+    query.add_argument(
+        "--top-p", dest="top_p", type=_unit_float, help="Sampling top_p override"
+    )
+    query.add_argument(
+        "--top-k", dest="top_k", type=_non_negative_int, help="Sampling top_k override"
+    )
+    query.add_argument(
+        "-t",
+        "--timeout-seconds",
+        type=_positive_int,
+        help="Request timeout in seconds (default: 600)",
+    )
+    query.add_argument(
+        "-r",
+        "--retries",
+        type=_non_negative_int,
+        help="Max retries for retryable errors (default: 3)",
+    )
     query.add_argument("query", nargs="?")
 
-    cont = sub.add_parser("continue", aliases=["cont", "c"], help="Continue the most recent conversation")
-    cont.add_argument("--session", help="Continue a specific session id (default: latest)")
-    cont.add_argument("--json", action="store_true", help="Emit a single-line JSON object")
-    cont.add_argument("--attach", action="append", help="Append file content to the prompt ('-' for stdin)", default=[])
-    cont.add_argument("--prompt-file", help="Read prompt text from file ('-' for stdin)")
-    cont.add_argument("--temperature", type=_non_negative_float, help="Sampling temperature override")
-    cont.add_argument("--top-p", dest="top_p", type=_unit_float, help="Sampling top_p override")
-    cont.add_argument("--top-k", dest="top_k", type=_non_negative_int, help="Sampling top_k override")
-    cont.add_argument("-t", "--timeout-seconds", type=_positive_int, help="Request timeout in seconds (default: 600)")
-    cont.add_argument("-r", "--retries", type=_non_negative_int, help="Max retries for retryable errors (default: 3)")
+    cont = sub.add_parser(
+        "continue", aliases=["cont", "c"], help="Continue the most recent conversation"
+    )
+    cont.add_argument(
+        "--session", help="Continue a specific session id (default: latest)"
+    )
+    cont.add_argument(
+        "--json", action="store_true", help="Emit a single-line JSON object"
+    )
+    cont.add_argument(
+        "--attach",
+        action="append",
+        help="Append file content to the prompt ('-' for stdin)",
+        default=[],
+    )
+    cont.add_argument(
+        "--prompt-file", help="Read prompt text from file ('-' for stdin)"
+    )
+    cont.add_argument(
+        "--temperature", type=_non_negative_float, help="Sampling temperature override"
+    )
+    cont.add_argument(
+        "--top-p", dest="top_p", type=_unit_float, help="Sampling top_p override"
+    )
+    cont.add_argument(
+        "--top-k", dest="top_k", type=_non_negative_int, help="Sampling top_k override"
+    )
+    cont.add_argument(
+        "-t",
+        "--timeout-seconds",
+        type=_positive_int,
+        help="Request timeout in seconds (default: 600)",
+    )
+    cont.add_argument(
+        "-r",
+        "--retries",
+        type=_non_negative_int,
+        help="Max retries for retryable errors (default: 3)",
+    )
     cont.add_argument("query", nargs="?")
 
     dump = sub.add_parser("dump", help="Dump the latest session context as JSON")
@@ -434,34 +532,97 @@ def _build_parser() -> argparse.ArgumentParser:
     rm = sub.add_parser("rm", help="Remove a configured model shortname")
     rm.add_argument("shortname")
 
-    test = sub.add_parser("test", help="Test a provider/model configuration (optionally save with --save)")
+    test = sub.add_parser(
+        "test", help="Test a provider/model configuration (optionally save with --save)"
+    )
     test.add_argument("--provider", required=True, help="Provider name (llm_client)")
     test.add_argument("model", help="Full model identifier")
     test.add_argument("--sysprompt", help="Saved system prompt for this model")
-    test.add_argument("--sysprompt-file", help="Read saved system prompt from file ('-' for stdin)")
-    test.add_argument("--json", action="store_true", help="Emit a single-line JSON object")
-    test.add_argument("--save", metavar="SHORTNAME", help="Save/overwrite this shortname on success")
-    test.add_argument("--attach", action="append", help="Append file content to the prompt ('-' for stdin)", default=[])
-    test.add_argument("--prompt-file", help="Read prompt text from file ('-' for stdin)")
-    test.add_argument("--temperature", type=_non_negative_float, help="Sampling temperature override (and saved with --save)")
-    test.add_argument("--top-p", dest="top_p", type=_unit_float, help="Sampling top_p override (and saved with --save)")
-    test.add_argument("--top-k", dest="top_k", type=_non_negative_int, help="Sampling top_k override (and saved with --save)")
-    test.add_argument("-t", "--timeout-seconds", type=_positive_int, help="Request timeout in seconds (default: 600)")
-    test.add_argument("-r", "--retries", type=_non_negative_int, help="Max retries for retryable errors (default: 3)")
+    test.add_argument(
+        "--sysprompt-file", help="Read saved system prompt from file ('-' for stdin)"
+    )
+    test.add_argument(
+        "--json", action="store_true", help="Emit a single-line JSON object"
+    )
+    test.add_argument(
+        "--save", metavar="SHORTNAME", help="Save/overwrite this shortname on success"
+    )
+    test.add_argument(
+        "--attach",
+        action="append",
+        help="Append file content to the prompt ('-' for stdin)",
+        default=[],
+    )
+    test.add_argument(
+        "--prompt-file", help="Read prompt text from file ('-' for stdin)"
+    )
+    test.add_argument(
+        "--temperature",
+        type=_non_negative_float,
+        help="Sampling temperature override (and saved with --save)",
+    )
+    test.add_argument(
+        "--top-p",
+        dest="top_p",
+        type=_unit_float,
+        help="Sampling top_p override (and saved with --save)",
+    )
+    test.add_argument(
+        "--top-k",
+        dest="top_k",
+        type=_non_negative_int,
+        help="Sampling top_k override (and saved with --save)",
+    )
+    test.add_argument(
+        "-t",
+        "--timeout-seconds",
+        type=_positive_int,
+        help="Request timeout in seconds (default: 600)",
+    )
+    test.add_argument(
+        "-r",
+        "--retries",
+        type=_non_negative_int,
+        help="Max retries for retryable errors (default: 3)",
+    )
     test.add_argument("query", nargs="?")
 
-    batch = sub.add_parser("batch", help="Process a JSONL file with prompts and write JSONL responses")
+    batch = sub.add_parser(
+        "batch", help="Process a JSONL file with prompts and write JSONL responses"
+    )
     batch.add_argument("shortname")
-    batch.add_argument("--infile", "-i", required=True, help="Input JSONL path ('-' for stdin)")
-    batch.add_argument("--outfile", "-o", required=True, help="Output JSONL path ('-' for stdout)")
+    batch.add_argument(
+        "--infile", "-i", required=True, help="Input JSONL path ('-' for stdin)"
+    )
+    batch.add_argument(
+        "--outfile", "-o", required=True, help="Output JSONL path ('-' for stdout)"
+    )
     batch.add_argument("--sysprompt", "-s", help="Override system prompt for this run")
-    batch.add_argument("--sysprompt-file", help="Read system prompt from file ('-' for stdin)")
-    batch.add_argument("--prompt", help="Prefix prompt (prepends input row prompt as an attachment)", default=None)
-    batch.add_argument("--temperature", type=_non_negative_float, help="Sampling temperature override")
-    batch.add_argument("--top-p", dest="top_p", type=_unit_float, help="Sampling top_p override")
-    batch.add_argument("--top-k", dest="top_k", type=_non_negative_int, help="Sampling top_k override")
-    batch.add_argument("--workers", type=_positive_int, default=20, help="Worker threads (default: 20)")
-    batch.add_argument("--extract-tags", action="store_true", help="Extract <field>value</field> into `tag:field` keys")
+    batch.add_argument(
+        "--sysprompt-file", help="Read system prompt from file ('-' for stdin)"
+    )
+    batch.add_argument(
+        "--prompt",
+        help="Prefix prompt (prepends input row prompt as an attachment)",
+        default=None,
+    )
+    batch.add_argument(
+        "--temperature", type=_non_negative_float, help="Sampling temperature override"
+    )
+    batch.add_argument(
+        "--top-p", dest="top_p", type=_unit_float, help="Sampling top_p override"
+    )
+    batch.add_argument(
+        "--top-k", dest="top_k", type=_non_negative_int, help="Sampling top_k override"
+    )
+    batch.add_argument(
+        "--workers", type=_positive_int, default=20, help="Worker threads (default: 20)"
+    )
+    batch.add_argument(
+        "--extract-tags",
+        action="store_true",
+        help="Extract <field>value</field> into `tag:field` keys",
+    )
     batch.add_argument(
         "--progress-seconds",
         type=_non_negative_int,
@@ -488,14 +649,18 @@ def _build_parser() -> argparse.ArgumentParser:
     session_sub.add_parser("list", help="List sessions")
     session_select = session_sub.add_parser("select", help="Select a session as latest")
     session_select.add_argument("session_id")
-    session_rename = session_sub.add_parser("rename", help="Rename a session id (updates latest pointer if needed)")
+    session_rename = session_sub.add_parser(
+        "rename", help="Rename a session id (updates latest pointer if needed)"
+    )
     session_rename.add_argument("old_id")
     session_rename.add_argument("new_id")
 
     return parser
 
 
-def _extract_global_config(argv: list[str] | None) -> tuple[list[str] | None, str | None]:
+def _extract_global_config(
+    argv: list[str] | None,
+) -> tuple[list[str] | None, str | None]:
     """
     Allow `--config` to appear anywhere in the command line (before or after subcommands).
 
@@ -532,7 +697,9 @@ def _cmd_add(args: argparse.Namespace) -> int:
     except Exception as e:
         _print_err(str(e))
         return 2
-    sysprompt = _resolve_sysprompt(sysprompt=args.sysprompt, sysprompt_file=args.sysprompt_file)
+    sysprompt = _resolve_sysprompt(
+        sysprompt=args.sysprompt, sysprompt_file=args.sysprompt_file
+    )
     upsert_model(
         args.shortname,
         args.provider,
@@ -563,11 +730,21 @@ def _cmd_query(args: argparse.Namespace) -> int:
     model_cfg = get_model(args.shortname)
     provider = model_cfg["provider"]
     model = model_cfg["model"]
-    temperature = args.temperature if args.temperature is not None else model_cfg.get("temperature")
+    temperature = (
+        args.temperature
+        if args.temperature is not None
+        else model_cfg.get("temperature")
+    )
     top_p = args.top_p if args.top_p is not None else model_cfg.get("top_p")
     top_k = args.top_k if args.top_k is not None else model_cfg.get("top_k")
-    override_sysprompt = _resolve_sysprompt(sysprompt=args.sysprompt, sysprompt_file=args.sysprompt_file)
-    sysprompt = override_sysprompt if override_sysprompt is not None else model_cfg.get("sysprompt")
+    override_sysprompt = _resolve_sysprompt(
+        sysprompt=args.sysprompt, sysprompt_file=args.sysprompt_file
+    )
+    sysprompt = (
+        override_sysprompt
+        if override_sysprompt is not None
+        else model_cfg.get("sysprompt")
+    )
 
     messages: list[dict] = []
     if sysprompt:
@@ -623,9 +800,9 @@ def _cmd_query(args: argparse.Namespace) -> int:
         sysprompt=sysprompt,
         session_id=session_id,
         helper=(
-            f"continue with `mq continue \"<your message>\"` "
-            f"(or `mq continue --session {session_id} \"<your message>\"`)"
-        )
+            f'continue with `mq continue "<your message>"` '
+            f'(or `mq continue --session {session_id} "<your message>"`)'
+        ),
     )
     return 0
 
@@ -636,7 +813,11 @@ def _cmd_continue(args: argparse.Namespace) -> int:
     provider = session.get("provider")
     model = session.get("model")
     messages = session.get("messages")
-    if not isinstance(provider, str) or not isinstance(model, str) or not isinstance(messages, list):
+    if (
+        not isinstance(provider, str)
+        or not isinstance(model, str)
+        or not isinstance(messages, list)
+    ):
         _print_err("Invalid last conversation format")
         return 2
 
@@ -650,12 +831,18 @@ def _cmd_continue(args: argparse.Namespace) -> int:
         except MQError:
             defaults = None
 
-    temperature = args.temperature if args.temperature is not None else (defaults or {}).get("temperature")
+    temperature = (
+        args.temperature
+        if args.temperature is not None
+        else (defaults or {}).get("temperature")
+    )
     top_p = args.top_p if args.top_p is not None else (defaults or {}).get("top_p")
     top_k = args.top_k if args.top_k is not None else (defaults or {}).get("top_k")
 
     if args.json:
-        _print_err("warning: --json output does not include full conversation context (use `mq dump` for history)")
+        _print_err(
+            "warning: --json output does not include full conversation context (use `mq dump` for history)"
+        )
 
     messages = list(messages)
     _assert_stdin_not_double_used(
@@ -714,7 +901,9 @@ def _cmd_test(args: argparse.Namespace) -> int:
         return 2
 
     messages: list[dict] = []
-    sysprompt = _resolve_sysprompt(sysprompt=args.sysprompt, sysprompt_file=args.sysprompt_file)
+    sysprompt = _resolve_sysprompt(
+        sysprompt=args.sysprompt, sysprompt_file=args.sysprompt_file
+    )
     if sysprompt:
         messages.append({"role": "system", "content": sysprompt})
     _assert_stdin_not_double_used(
@@ -763,7 +952,11 @@ def _cmd_batch(args: argparse.Namespace) -> int:
     model_cfg = get_model(args.shortname)
     provider = model_cfg["provider"]
     model = model_cfg["model"]
-    temperature = args.temperature if args.temperature is not None else model_cfg.get("temperature")
+    temperature = (
+        args.temperature
+        if args.temperature is not None
+        else model_cfg.get("temperature")
+    )
     top_p = args.top_p if args.top_p is not None else model_cfg.get("top_p")
     top_k = args.top_k if args.top_k is not None else model_cfg.get("top_k")
     _assert_stdin_not_double_used(
@@ -772,7 +965,9 @@ def _cmd_batch(args: argparse.Namespace) -> int:
         attach_paths=[],
         sysprompt_file=args.sysprompt_file if args.infile == "-" else None,
     )
-    sysprompt = _resolve_sysprompt(sysprompt=args.sysprompt, sysprompt_file=args.sysprompt_file)
+    sysprompt = _resolve_sysprompt(
+        sysprompt=args.sysprompt, sysprompt_file=args.sysprompt_file
+    )
     if sysprompt is None:
         sysprompt = model_cfg.get("sysprompt")
 
@@ -784,7 +979,14 @@ def _cmd_batch(args: argparse.Namespace) -> int:
     started = time.monotonic()
     last_report = started
 
-    reserved_output_keys = {"response", "reasoning", "sysprompt", "error", "error_info", "mq_input_prompt"}
+    reserved_output_keys = {
+        "response",
+        "reasoning",
+        "sysprompt",
+        "error",
+        "error_info",
+        "mq_input_prompt",
+    }
     if args.extract_tags:
         # Tag extraction writes keys like `tag:field`, so reserve that namespace.
         reserved_prefixes = ("tag:",)
@@ -794,7 +996,9 @@ def _cmd_batch(args: argparse.Namespace) -> int:
     def _check_merge_conflicts(line_no: int, row: dict) -> None:
         for k in reserved_output_keys:
             if k in row:
-                raise UserError(f"Batch merge conflict on line {line_no}: input contains reserved key {k!r}")
+                raise UserError(
+                    f"Batch merge conflict on line {line_no}: input contains reserved key {k!r}"
+                )
         for prefix in reserved_prefixes:
             for k in row.keys():
                 if isinstance(k, str) and k.startswith(prefix):
@@ -843,7 +1047,9 @@ def _cmd_batch(args: argparse.Namespace) -> int:
                 extracted = _extract_tags(result.content)
                 for k in extracted.keys():
                     if k in out:
-                        raise UserError(f"Batch merge conflict on line {line_no}: extracted key {k!r} already exists")
+                        raise UserError(
+                            f"Batch merge conflict on line {line_no}: extracted key {k!r} already exists"
+                        )
                 out.update(extracted)
         except MQError as e:
             any_errors = True
@@ -933,7 +1139,10 @@ def _cmd_batch(args: argparse.Namespace) -> int:
             def _write_future_result(fut) -> None:
                 nonlocal processed, ok, errors
                 row_out = fut.result()
-                out_fp.write(json.dumps(row_out, ensure_ascii=False, separators=(",", ":")) + "\n")
+                out_fp.write(
+                    json.dumps(row_out, ensure_ascii=False, separators=(",", ":"))
+                    + "\n"
+                )
                 processed += 1
                 if isinstance(row_out, dict) and row_out.get("error"):
                     errors += 1
@@ -1055,7 +1264,11 @@ def main(argv: list[str] | None = None) -> int:
     argv, extracted_config = _extract_global_config(argv)
     args = parser.parse_args(argv)
     try:
-        config_path = extracted_config if extracted_config is not None else getattr(args, "config", None)
+        config_path = (
+            extracted_config
+            if extracted_config is not None
+            else getattr(args, "config", None)
+        )
         if config_path:
             if config_path == "-":
                 raise UserError("--config cannot be '-' (stdin)")

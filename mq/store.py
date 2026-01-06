@@ -63,11 +63,14 @@ def _session_filename(session_id: str) -> str:
 def session_path(session_id: str) -> Path:
     return sessions_dir() / _session_filename(session_id)
 
+
 def validate_session_id(session_id: str) -> None:
     if not isinstance(session_id, str) or not session_id:
         raise UserError("Session id must be non-empty")
     if not SESSION_ID_RE.fullmatch(session_id):
-        raise UserError("Invalid session id (use only letters, digits, '_' and '-', no spaces)")
+        raise UserError(
+            "Invalid session id (use only letters, digits, '_' and '-', no spaces)"
+        )
 
 
 def session_exists(session_id: str) -> bool:
@@ -172,7 +175,11 @@ def load_latest_session() -> dict[str, Any]:
     if last.exists() or last.is_symlink():
         try:
             data = _read_json(last)
-            if isinstance(data, dict) and isinstance(data.get("id"), str) and data.get("id"):
+            if (
+                isinstance(data, dict)
+                and isinstance(data.get("id"), str)
+                and data.get("id")
+            ):
                 return data
         except Exception:
             pass
@@ -250,6 +257,7 @@ def rename_session(old_id: str, new_id: str) -> None:
     if current == old_id:
         _set_latest_session(new_id)
 
+
 def _read_json(path: Path) -> Any:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -321,7 +329,11 @@ def upsert_model(
 
     config = load_config()
     models = dict(config.get("models", {}))
-    entry: dict[str, Any] = {"provider": provider, "model": model, "sysprompt": sysprompt}
+    entry: dict[str, Any] = {
+        "provider": provider,
+        "model": model,
+        "sysprompt": sysprompt,
+    }
     if temperature is not None:
         entry["temperature"] = float(temperature)
     if top_p is not None:
@@ -349,7 +361,9 @@ def get_model(shortname: str) -> dict[str, Any]:
     top_p = entry.get("top_p")
     top_k = entry.get("top_k")
     if not isinstance(provider, str) or not isinstance(model, str):
-        raise ConfigError(f"Invalid model entry for {shortname!r} (missing provider/model)")
+        raise ConfigError(
+            f"Invalid model entry for {shortname!r} (missing provider/model)"
+        )
     if sysprompt is not None and not isinstance(sysprompt, str):
         raise ConfigError(f"Invalid sysprompt for {shortname!r} (expected string)")
 
