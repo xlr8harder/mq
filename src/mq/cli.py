@@ -429,7 +429,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Default sampling top_k (saved in config)",
     )
 
-    models = sub.add_parser("models", help="List configured models")
+    _models = sub.add_parser("models", help="List configured models")
 
     query = sub.add_parser(
         "query",
