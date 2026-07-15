@@ -1,11 +1,11 @@
 [project]
 name = "mq"
-version = "0.2.6"
+version = "0.2.7"
 description = "Command-line tool to query configured LLM chat models"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "llm-client @ git+https://github.com/xlr8harder/llm_client.git@c8261781699d5ac02429190c4fa9bb02ee42ba96",
+    "llm-client @ git+https://github.com/xlr8harder/llm_client.git@639f30c94471b413d2325cce95f854da9af5ae93",
 ]
 
 [project.scripts]
