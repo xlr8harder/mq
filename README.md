@@ -132,7 +132,7 @@ Provider names accepted by `--provider` are implemented in `llm_client`. Common 
 - `openai` (`OPENAI_API_KEY`)
 - `openrouter` (`OPENROUTER_API_KEY`)
 - `chutes` (`CHUTES_API_TOKEN`)
-- `codex` (OAuth; set `LLM_CLIENT_CODEX_CLIENT_ID`, then run `mq auth login codex`)
+- `codex` (OAuth; run `mq auth login codex`)
 - `local` (OpenAI-compatible endpoint in the model slug, for example `127.0.0.1:8000/qwen3-4b`)
 
 Examples:

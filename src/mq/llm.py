@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import json
-import os
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
 from llm_client import (
     Client,
-    CodexOAuthManager,
     Conversation,
     ModelResponse,
     get_provider,
@@ -67,7 +65,7 @@ def chat(
             max_retries=retries,
             **options,
         )
-    with _client(provider_name, timeout=timeout, max_retries=retries) as client:
+    with _client(timeout=timeout, max_retries=retries) as client:
         conversation = client.model(model_ref(provider_name, model_id)).conversation(
             messages=messages
         )
@@ -98,7 +96,6 @@ def continue_conversation(
     if provider_name.strip().lower() == "local" and local_endpoint is None:
         local_endpoint = _local_endpoint(model_id)
     with _client(
-        provider_name,
         timeout=timeout,
         max_retries=retries,
         local_endpoint=local_endpoint,
@@ -227,15 +224,6 @@ def _extract_reasoning(raw: Any) -> str | None:
     return None
 
 
-def codex_oauth_manager(*, client_id: str | None = None) -> CodexOAuthManager:
-    resolved = client_id or os.getenv("LLM_CLIENT_CODEX_CLIENT_ID")
-    if not resolved:
-        raise LLMError(
-            "Codex requires LLM_CLIENT_CODEX_CLIENT_ID. Set it, then run `mq auth login codex`."
-        )
-    return CodexOAuthManager.create(client_id=resolved)
-
-
 def _local_endpoint(model: str) -> str:
     value = model.removeprefix("local/")
     host, separator, _model_id = value.partition("/")
@@ -248,15 +236,12 @@ def _local_endpoint(model: str) -> str:
 
 
 @contextmanager
-def _client(provider: str, **kwargs: Any):
-    manager = codex_oauth_manager() if provider.strip().lower() == "codex" else None
-    client = Client(auth={"codex": manager} if manager else None, **kwargs)
+def _client(**kwargs: Any):
+    client = Client(**kwargs)
     try:
         yield client
     finally:
         client.close()
-        if manager is not None:
-            manager.close()
 
 
 def _chat_result(

@@ -6,15 +6,15 @@ import sys
 import re
 import time
 import math
-import webbrowser
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import Iterable
 
 from llm_client import get_provider
+from llm_client.cli import main as llm_client_cli_main
 
 from .errors import LLMError, MQError, UserError
-from .llm import chat, codex_oauth_manager, continue_conversation
+from .llm import chat, continue_conversation
 from .store import (
     ensure_home,
     create_session,
@@ -102,7 +102,6 @@ Commands:
 
   mq auth login codex
     - Starts an independent OAuth PKCE login for the Codex provider.
-    - Requires LLM_CLIENT_CODEX_CLIENT_ID (or --client-id).
 
 Output formats:
   - Normal: prints `session: <id>` first, then optional reasoning, then response.
@@ -115,7 +114,7 @@ Provider API keys (environment variables, via llm_client):
   - openai: OPENAI_API_KEY
   - openrouter: OPENROUTER_API_KEY
   - chutes: CHUTES_API_TOKEN
-  - codex: LLM_CLIENT_CODEX_CLIENT_ID plus `mq auth login codex`
+  - codex: run `mq auth login codex`
   - local: endpoint encoded in the model slug; optional LOCAL_LLM_API_KEY
 
 Request controls:
@@ -667,10 +666,11 @@ def _build_parser() -> argparse.ArgumentParser:
     auth_login = auth_sub.add_parser("login", help="Log in to a provider")
     auth_login.add_argument("provider", choices=["codex"])
     auth_login.add_argument(
-        "--client-id", help="OAuth client id (defaults to LLM_CLIENT_CODEX_CLIENT_ID)"
-    )
-    auth_login.add_argument(
-        "--no-browser", action="store_true", help="Do not open the authorization URL"
+        "--manual",
+        "--no-browser",
+        dest="manual",
+        action="store_true",
+        help="Print the authorization URL and paste the callback",
     )
 
     return parser
@@ -1282,19 +1282,10 @@ def _cmd_session_rename(args: argparse.Namespace) -> int:
 
 
 def _cmd_auth_login(args: argparse.Namespace) -> int:
-    manager = codex_oauth_manager(client_id=args.client_id)
-    try:
-        login = manager.begin_login()
-        print("Open this URL to authorize mq:")
-        print(login.url)
-        if not args.no_browser:
-            webbrowser.open(login.url)
-        callback = input("Paste the full redirected callback URL: ").strip()
-        manager.complete_redirect(callback, login)
-    finally:
-        manager.close()
-    print("Codex login stored.")
-    return 0
+    command = ["auth", "login", "codex"]
+    if args.manual:
+        command.append("--manual")
+    return llm_client_cli_main(command)
 
 
 def _cmd_help(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:

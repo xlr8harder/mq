@@ -141,8 +141,8 @@ wheels = [
 
 [[package]]
 name = "llm-client"
-version = "0.2.2"
-source = { git = "https://github.com/xlr8harder/llm_client.git?rev=f663628644d5291a5520c19245ee69ae9c805ea5#f663628644d5291a5520c19245ee69ae9c805ea5" }
+version = "0.3.0"
+source = { git = "https://github.com/xlr8harder/llm_client.git?rev=e29b3a7ef4f4055beec6222eb5c61b0692662bfa#e29b3a7ef4f4055beec6222eb5c61b0692662bfa" }
 dependencies = [
     { name = "httpx" },
     { name = "pytest" },
@@ -159,7 +159,7 @@ dependencies = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "llm-client", git = "https://github.com/xlr8harder/llm_client.git?rev=f663628644d5291a5520c19245ee69ae9c805ea5" }]
+requires-dist = [{ name = "llm-client", git = "https://github.com/xlr8harder/llm_client.git?rev=e29b3a7ef4f4055beec6222eb5c61b0692662bfa" }]
 
 [[package]]
 name = "packaging"

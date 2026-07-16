@@ -21,35 +21,11 @@ from mq import llm as mq_llm
 
 
 class MQCLITests(unittest.TestCase):
-    def test_codex_auth_login_completes_pkce_callback(self):
-        class Login:
-            url = "https://auth.example/authorize"
-
-        class Manager:
-            def __init__(self):
-                self.completed = None
-                self.closed = False
-
-            def begin_login(self):
-                return Login()
-
-            def complete_redirect(self, callback, login):
-                self.completed = (callback, login)
-
-            def close(self):
-                self.closed = True
-
-        manager = Manager()
-        with (
-            patch("mq.cli.codex_oauth_manager", return_value=manager),
-            patch("mq.cli.webbrowser.open") as browser,
-            patch("builtins.input", return_value="http://localhost/callback?code=x"),
-        ):
-            rc = cli.main(["auth", "login", "codex", "--client-id", "client"])
+    def test_codex_auth_login_delegates_to_llm_client(self):
+        with patch("mq.cli.llm_client_cli_main", return_value=0) as login:
+            rc = cli.main(["auth", "login", "codex", "--manual"])
         self.assertEqual(rc, 0)
-        browser.assert_called_once_with(Login.url)
-        self.assertEqual(manager.completed[0], "http://localhost/callback?code=x")
-        self.assertTrue(manager.closed)
+        login.assert_called_once_with(["auth", "login", "codex", "--manual"])
 
     def test_dump_errors_without_conversation(self):
         with (
