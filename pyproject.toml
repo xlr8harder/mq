@@ -5,7 +5,7 @@ description = "Command-line tool to query configured LLM chat models"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "llm-client @ git+https://github.com/xlr8harder/llm_client.git@639f30c94471b413d2325cce95f854da9af5ae93",
+    "llm-client @ git+https://github.com/xlr8harder/llm_client.git@f663628644d5291a5520c19245ee69ae9c805ea5",
 ]
 
 [project.scripts]

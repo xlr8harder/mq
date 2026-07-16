@@ -6,6 +6,7 @@ import sys
 import re
 import time
 import math
+import webbrowser
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import Iterable
@@ -13,7 +14,7 @@ from typing import Iterable
 from llm_client import get_provider
 
 from .errors import LLMError, MQError, UserError
-from .llm import chat
+from .llm import chat, codex_oauth_manager, continue_conversation
 from .store import (
     ensure_home,
     create_session,
@@ -99,6 +100,10 @@ Commands:
   mq session rename <old> <new>
     - Lists/selects/renames sessions. Session ids must match: [A-Za-z0-9][A-Za-z0-9_-]{0,63}
 
+  mq auth login codex
+    - Starts an independent OAuth PKCE login for the Codex provider.
+    - Requires LLM_CLIENT_CODEX_CLIENT_ID (or --client-id).
+
 Output formats:
   - Normal: prints `session: <id>` first, then optional reasoning, then response.
   - JSON (--json): single line object containing at least:
@@ -110,6 +115,8 @@ Provider API keys (environment variables, via llm_client):
   - openai: OPENAI_API_KEY
   - openrouter: OPENROUTER_API_KEY
   - chutes: CHUTES_API_TOKEN
+  - codex: LLM_CLIENT_CODEX_CLIENT_ID plus `mq auth login codex`
+  - local: endpoint encoded in the model slug; optional LOCAL_LLM_API_KEY
 
 Request controls:
   - -t/--timeout-seconds N  (default: 600)
@@ -655,6 +662,17 @@ def _build_parser() -> argparse.ArgumentParser:
     session_rename.add_argument("old_id")
     session_rename.add_argument("new_id")
 
+    auth = sub.add_parser("auth", help="Manage provider authentication")
+    auth_sub = auth.add_subparsers(dest="auth_command", required=True)
+    auth_login = auth_sub.add_parser("login", help="Log in to a provider")
+    auth_login.add_argument("provider", choices=["codex"])
+    auth_login.add_argument(
+        "--client-id", help="OAuth client id (defaults to LLM_CLIENT_CODEX_CLIENT_ID)"
+    )
+    auth_login.add_argument(
+        "--no-browser", action="store_true", help="Do not open the authorization URL"
+    )
+
     return parser
 
 
@@ -791,6 +809,7 @@ def _cmd_query(args: argparse.Namespace) -> int:
         sysprompt=sysprompt,
         messages=messages,
         session_id=args.session,
+        conversation_v2=result.conversation,
     )
     _emit_result(
         response=result.content,
@@ -853,20 +872,36 @@ def _cmd_continue(args: argparse.Namespace) -> int:
     )
     raw_query = _resolve_prompt(query=args.query, prompt_file=args.prompt_file)
     query = _apply_attachments_to_prompt(raw_query, args.attach)
-    messages.append({"role": "user", "content": query})
-
-    result = chat(
-        provider,
-        model,
-        messages,
-        timeout_seconds=args.timeout_seconds,
-        max_retries=args.retries,
-        temperature=temperature,
-        top_p=top_p,
-        top_k=top_k,
-    )
+    serialized = session.get("conversation_v2")
+    if isinstance(serialized, dict):
+        result = continue_conversation(
+            serialized,
+            query,
+            provider_name=provider,
+            model_id=model,
+            timeout_seconds=args.timeout_seconds,
+            max_retries=args.retries,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+        )
+        messages.append({"role": "user", "content": query})
+    else:
+        messages.append({"role": "user", "content": query})
+        result = chat(
+            provider,
+            model,
+            messages,
+            timeout_seconds=args.timeout_seconds,
+            max_retries=args.retries,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+        )
     messages.append({"role": "assistant", "content": result.content})
     session["messages"] = messages
+    if result.conversation is not None:
+        session["conversation_v2"] = result.conversation
     save_session(session)
     _emit_result(
         response=result.content,
@@ -1246,6 +1281,22 @@ def _cmd_session_rename(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_auth_login(args: argparse.Namespace) -> int:
+    manager = codex_oauth_manager(client_id=args.client_id)
+    try:
+        login = manager.begin_login()
+        print("Open this URL to authorize mq:")
+        print(login.url)
+        if not args.no_browser:
+            webbrowser.open(login.url)
+        callback = input("Paste the full redirected callback URL: ").strip()
+        manager.complete_redirect(callback, login)
+    finally:
+        manager.close()
+    print("Codex login stored.")
+    return 0
+
+
 def _cmd_help(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     topic = list(getattr(args, "topic", []) or [])
     if not topic:
@@ -1295,6 +1346,8 @@ def main(argv: list[str] | None = None) -> int:
                 return _cmd_test(args)
             case "batch":
                 return _cmd_batch(args)
+            case "auth":
+                return _cmd_auth_login(args)
             case "session":
                 match args.session_command:
                     case "list":

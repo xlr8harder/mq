@@ -124,6 +124,7 @@ def create_session(
     sysprompt: str | None,
     messages: list[dict],
     session_id: str | None = None,
+    conversation_v2: dict[str, Any] | None = None,
 ) -> str:
     if session_id is None:
         session_id = uuid.uuid4().hex
@@ -142,6 +143,8 @@ def create_session(
         "sysprompt": sysprompt,
         "messages": messages,
     }
+    if conversation_v2 is not None:
+        data["conversation_v2"] = conversation_v2
     _write_json_atomic(session_path(session_id), data)
     _set_latest_session(session_id)
     return session_id

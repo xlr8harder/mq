@@ -132,6 +132,22 @@ Provider names accepted by `--provider` are implemented in `llm_client`. Common 
 - `openai` (`OPENAI_API_KEY`)
 - `openrouter` (`OPENROUTER_API_KEY`)
 - `chutes` (`CHUTES_API_TOKEN`)
+- `codex` (OAuth; set `LLM_CLIENT_CODEX_CLIENT_ID`, then run `mq auth login codex`)
+- `local` (OpenAI-compatible endpoint in the model slug, for example `127.0.0.1:8000/qwen3-4b`)
+
+Examples:
+
+```bash
+mq add codex --provider codex gpt-5.4
+mq add local-qwen --provider local 127.0.0.1:8000/qwen3-4b
+```
+
+Sessions retain the existing flat `messages` view and also store llm_client's
+canonical conversation record. Existing sessions are upgraded after their next
+successful continuation. Local endpoint addresses are omitted from the canonical
+record and rebound from MQ configuration at runtime. OpenAI, OpenRouter, Codex,
+and local routes use the V2 conversation transport; other existing providers keep
+the compatibility transport until equivalent V2 protocol support is available.
 
 Run `mq help` for the most up-to-date list.
 

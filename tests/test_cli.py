@@ -2,11 +2,15 @@ import io
 import json
 import os
 import tempfile
+import time
 import unittest
 from threading import Event
 from pathlib import Path
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
+
+import httpx
+from llm_client import Client as V2Client
 
 from mq import cli
 from mq import store
@@ -17,6 +21,36 @@ from mq import llm as mq_llm
 
 
 class MQCLITests(unittest.TestCase):
+    def test_codex_auth_login_completes_pkce_callback(self):
+        class Login:
+            url = "https://auth.example/authorize"
+
+        class Manager:
+            def __init__(self):
+                self.completed = None
+                self.closed = False
+
+            def begin_login(self):
+                return Login()
+
+            def complete_redirect(self, callback, login):
+                self.completed = (callback, login)
+
+            def close(self):
+                self.closed = True
+
+        manager = Manager()
+        with (
+            patch("mq.cli.codex_oauth_manager", return_value=manager),
+            patch("mq.cli.webbrowser.open") as browser,
+            patch("builtins.input", return_value="http://localhost/callback?code=x"),
+        ):
+            rc = cli.main(["auth", "login", "codex", "--client-id", "client"])
+        self.assertEqual(rc, 0)
+        browser.assert_called_once_with(Login.url)
+        self.assertEqual(manager.completed[0], "http://localhost/callback?code=x")
+        self.assertTrue(manager.closed)
+
     def test_dump_errors_without_conversation(self):
         with (
             tempfile.TemporaryDirectory() as td,
@@ -813,12 +847,12 @@ class MQCLITests(unittest.TestCase):
             self.assertEqual(store.list_sessions(), [])
 
             lines = [
-                l
-                for l in out_path.read_text(encoding="utf-8").splitlines()
-                if l.strip()
+                line
+                for line in out_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
             ]
             self.assertEqual(len(lines), 2)
-            rows = [json.loads(l) for l in lines]
+            rows = [json.loads(line) for line in lines]
             by_id = {r["id"]: r for r in rows}
             self.assertIn("response", by_id[1])
             self.assertIn("prompt", by_id[1])
@@ -872,6 +906,7 @@ class MQCLITests(unittest.TestCase):
                 content = messages[-1]["content"]
                 if "P1" in content:
                     allow_p1.wait(timeout=2)
+                    time.sleep(0.05)
                     return ChatResult(content="R1")
                 if "P2" in content:
                     allow_p1.set()
@@ -895,9 +930,9 @@ class MQCLITests(unittest.TestCase):
                 )
             self.assertEqual(rc, 0)
             lines = [
-                l
-                for l in out_path.read_text(encoding="utf-8").splitlines()
-                if l.strip()
+                line
+                for line in out_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
             ]
             self.assertEqual(len(lines), 2)
             first = json.loads(lines[0])
@@ -1020,27 +1055,33 @@ class MQCLITests(unittest.TestCase):
 
 
 class MQLLMControlsTests(unittest.TestCase):
+    @staticmethod
+    def _client_factory(calls):
+        def handler(_request):
+            return httpx.Response(
+                200,
+                json={
+                    "id": "chat-test",
+                    "model": "gpt-4o-mini",
+                    "choices": [
+                        {
+                            "message": {"role": "assistant", "content": "ok"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {},
+                },
+            )
+
+        def create(**kwargs):
+            calls.update(kwargs)
+            return V2Client(transport=httpx.MockTransport(handler), **kwargs)
+
+        return create
+
     def test_llm_chat_defaults_timeout_and_retries(self):
         calls = {}
-
-        def fake_get_provider(_name):
-            return object()
-
-        class FakeResp:
-            success = True
-            standardized_response = {"content": "ok"}
-            raw_provider_response = {}
-            error_info = None
-
-        def fake_retry_request(provider, messages, model_id, **options):
-            calls["timeout"] = options.get("timeout")
-            calls["max_retries"] = options.get("max_retries")
-            return FakeResp()
-
-        with (
-            patch("mq.llm.get_provider", side_effect=fake_get_provider),
-            patch("mq.llm.retry_request", side_effect=fake_retry_request),
-        ):
+        with patch("mq.llm.Client", side_effect=self._client_factory(calls)):
             res = mq_llm.chat(
                 "openai", "gpt-4o-mini", [{"role": "user", "content": "hi"}]
             )
@@ -1050,25 +1091,7 @@ class MQLLMControlsTests(unittest.TestCase):
 
     def test_llm_chat_overrides_timeout_and_retries(self):
         calls = {}
-
-        def fake_get_provider(_name):
-            return object()
-
-        class FakeResp:
-            success = True
-            standardized_response = {"content": "ok"}
-            raw_provider_response = {}
-            error_info = None
-
-        def fake_retry_request(provider, messages, model_id, **options):
-            calls["timeout"] = options.get("timeout")
-            calls["max_retries"] = options.get("max_retries")
-            return FakeResp()
-
-        with (
-            patch("mq.llm.get_provider", side_effect=fake_get_provider),
-            patch("mq.llm.retry_request", side_effect=fake_retry_request),
-        ):
+        with patch("mq.llm.Client", side_effect=self._client_factory(calls)):
             res = mq_llm.chat(
                 "openai",
                 "gpt-4o-mini",
